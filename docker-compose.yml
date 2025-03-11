@@ -1,0 +1,102 @@
+version: "3.8"
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto
+    networks:
+      - mqtt-network
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+
+  mongo:
+    image: mongo:latest
+    container_name: mongo
+    networks:
+      - db-network
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  mysql:
+    image: mysql:8
+    container_name: mysql
+    networks:
+      - db-network
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: labirinto_mysql
+      MYSQL_USER: labuser
+      MYSQL_PASSWORD: labpass
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./initdb:/docker-entrypoint-initdb.d
+
+  mqtt_to_mongodb:
+    build: ./mqtt_to_mongodb
+    depends_on:
+      - mosquitto
+      - mongo
+    networks:
+      - mqtt-network
+      - db-network
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: "1883"
+      MOVEMENT_TOPIC: "pisid_mazemov_33"
+      SOUND_TOPIC: "pisid_mazesound_33"
+      MONGO_URI: mongodb://mongo:27017/
+    restart: always
+
+  mongodb_to_mysql:
+    build: ./mongodb_to_mysql
+    depends_on:
+      - mongo
+      - mysql
+    networks:
+      - db-network
+    environment:
+      MONGO_URI: mongodb://mongo:27017/labirinto
+      MYSQL_HOST: mysql
+      MYSQL_USER: labuser
+      MYSQL_PASSWORD: labpass
+      MYSQL_DATABASE: labirinto_mysql
+    restart: always
+
+  game_fixed:
+    build: ./game
+    depends_on:
+      - mysql
+    networks:
+      - db-network
+      - mqtt-network
+    environment:
+      - PLAYER_ID=33
+    restart: "no"
+
+  game_unique:
+    build: ./game
+    depends_on:
+      - mysql
+    networks:
+      - db-network
+      - mqtt-network
+    restart: "no"
+
+networks:
+  mqtt-network:
+    driver: bridge
+  db-network:
+    driver: bridge
+
+volumes:
+  mosquitto_data:
+  mosquitto_config:
+  mongo_data:
+  mysql_data:
+  qemu-reactos-disk:
