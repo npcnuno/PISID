@@ -1,5 +1,8 @@
+
 FROM scottyhardy/docker-wine:latest
-RUN apt-get install python3
+
+# Update package lists and install python3 and python3-pip
+RUN apt-get update && apt-get install -y python3 python3-pip
 
 # Set environment variables for Wine
 ENV WINEPREFIX=/home/wineuser/.wine
@@ -10,6 +13,11 @@ RUN mkdir -p $WINEPREFIX
 
 # Switch to wineuser and set HOME
 ENV HOME=/home/wineuser
+
+# Copy and install Python requirements
+COPY requirements.txt /app/requirements.txt
+COPY mqtt_to_mongodb.py /app/mqtt_to_mongodb.py
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Set XDG_CACHE_HOME explicitly
 ENV XDG_CACHE_HOME=$HOME/.cache
@@ -32,5 +40,7 @@ COPY _internal /app/_internal
 
 # Make sure the entrypoint script is executable
 RUN chmod +x /app/entrypoint.sh
+
 # Use our custom entrypoint
 ENTRYPOINT ["/app/entrypoint.sh"]
+
