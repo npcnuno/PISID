@@ -8,7 +8,7 @@ services:
   #     - "1883:1883"
   #   volumes:
   #     - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
-  #
+
   mongo:
     image: mongo:latest
     container_name: mongo
@@ -49,7 +49,7 @@ services:
   #     MYSQL_PASSWORD: labpass
   #     MYSQL_DATABASE: labirinto_mysql
   #   restart: always
-  #
+
   game_fixed:
     build: ./game
     depends_on:
