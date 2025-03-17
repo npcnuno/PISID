@@ -11,12 +11,15 @@ sleep 10
 
 PLAYER=${PLAYER_ID:-33}
 
-echo "Launching game.exe for player: $PLAYER..."
+echo "Launching mqtt_to_mongodb for player: $PLAYER"
 
 # Start the MQTT-to-MongoDB process in the background
 python3 /app/mqtt_to_mongodb.py &
 MQTT_PID=$!
 
+sleep 4
+
+echo "Launching game.exe for player: $PLAYER..."
 # Start the Wine game in the background
 wine /app/game.exe $PLAYER &
 GAME_PID=$!
