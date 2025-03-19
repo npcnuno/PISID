@@ -7,7 +7,7 @@ export WINEDEBUG=-all
 
 echo "Starting Xvfb on display :99..."
 Xvfb :99 -screen 0 1024x768x24 &
-sleep 10
+sleep 30
 
 PLAYER=${PLAYER_ID:-33}
 

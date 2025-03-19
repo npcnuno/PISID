@@ -1,23 +1,105 @@
 services:
-  # mosquitto:
-  #   image: eclipse-mosquitto:2.0
-  #   container_name: mosquitto
-  #   networks:
-  #     - mqtt-network
-  #   ports:
-  #     - "1883:1883"
-  #   volumes:
-  #     - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
-
-  mongo:
+  mongo1:
     image: mongo:latest
-    container_name: mongo
+    hostname: mongo1
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=adminpass
+    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
+    volumes:
+      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+      - mongo1_data:/data/db
+    ports:
+      - "30001:27017"
     networks:
       - db-network
-    ports:
-      - "27017:27017"
+
+  mongo2:
+    image: mongo:latest
+    hostname: mongo2
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=adminpass
+    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
     volumes:
-      - mongo_data:/data/db
+      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+      - mongo2_data:/data/db
+    ports:
+      - "30002:27017"
+    networks:
+      - db-network
+
+  mongo3:
+    image: mongo:latest
+    hostname: mongo3
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=adminpass
+    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
+    volumes:
+      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+      - mongo3_data:/data/db
+    ports:
+      - "30003:27017"
+    networks:
+      - db-network
+
+  mongoinit:
+    image: mongo:latest
+    depends_on:
+      - mongo1
+      - mongo2
+      - mongo3
+    command: >
+      bash -c "
+        echo "IF RUNNING ON WINDOWS CHANGE THE MEMBERS IN DOCKER COMPOSE"
+        echo 'Waiting for MongoDB instances...'
+      until mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
+            mongosh --host mongo2:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
+            mongosh --host mongo3:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")'; do
+        echo 'Waiting...'
+        sleep 5
+      done
+      echo 'Initiating replica set...'
+      mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval '
+        rs.initiate({
+          _id: \"my-mongo-set\",
+          members: [
+            members: [
+            {_id: 0, host: "172.17.0.1:30001", priority: 3},
+            {_id: 1, host: "172.17.0.1:30002", priority: 2},
+            {_id: 2, host: "172.17.0.1:30003", priority: 1}
+            ]
+          ]
+        });
+        while (rs.status().ok !== 1) { sleep(1000); print(\"Waiting for replica set...\"); }
+        print(\"Replica set initialized!\");
+      '
+      "
+    networks:
+      - db-network
+
+  game_fixed:
+    build: ./game
+    depends_on:
+      - mongo1
+      - mongo2
+      - mongo3
+      - mysql
+      - mongoinit
+    networks:
+      - db-network
+    environment:
+      PLAYER_ID: "33"
+      MQTT_BROKER: broker.mqtt-dashboard.com
+      MQTT_PORT: "1883"
+      MOVEMENT_TOPIC: pisid_mazemov_33
+      SOUND_TOPIC: pisid_mazesound_33
+      MONGO_USER: admin
+      MONGO_PASS: adminpass
+      MONGO_DB: game_monitoring
+      MONGO_AUTH_SOURCE: admin
+    restart: "unless-stopped"
 
   mysql:
     image: mysql:8
@@ -35,46 +117,12 @@ services:
       - mysql_data:/var/lib/mysql
       - ./initdb:/docker-entrypoint-initdb.d
 
-  # mongodb_to_mysql:
-  #   build: ./mongodb_to_mysql
-  #   depends_on:
-  #     - mongo
-  #     - mysql
-  #   networks:
-  #     - db-network
-  #   environment:
-  #     MONGO_URI: mongodb://mongo:27017/labirinto
-  #     MYSQL_HOST: mysql
-  #     MYSQL_USER: labuser
-  #     MYSQL_PASSWORD: labpass
-  #     MYSQL_DATABASE: labirinto_mysql
-  #   restart: always
-
-  game_fixed:
-    build: ./game
-    depends_on:
-      - mysql
-    networks:
-      - db-network
-      - mqtt-network
-    environment:
-      PLAYER_ID: "33"
-      MQTT_BROKER: mosquitto
-      MQTT_PORT: "1883"
-      MOVEMENT_TOPIC: pisid_mazemov_33
-      SOUND_TOPIC: pisid_mazesound_33
-      MONGO_URI: mongodb://mongo:27017/
-    restart: "no"
-
 networks:
-  mqtt-network:
-    driver: bridge
   db-network:
     driver: bridge
 
 volumes:
-  mosquitto_data:
-  mosquitto_config:
-  mongo_data:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
   mysql_data:
-  qemu-reactos-disk:
