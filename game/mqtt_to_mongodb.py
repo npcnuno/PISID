@@ -18,7 +18,7 @@ active_session_id = None
 # Configuration Settings
 # --------------------------
 player_id = int(os.getenv('PLAYER_ID', '33'))
-MQTT_BROKER = os.getenv('MQTT_BROKER', 'mosquitto')
+MQTT_BROKER = os.getenv('MQTT_BROKER', 'broker.mqtt-dashboard.com')
 MQTT_PORT = int(os.getenv('MQTT_PORT', '1883'))
 TOPICS = [
     f"pisid_mazeNovo_{player_id}",
@@ -116,7 +116,7 @@ mazesound_queue = queue.Queue()
 # --------------------------
 # Cache Setup
 # --------------------------
-message_cache = {topic: TTLCache(maxsize=CACHE_MAX_SIZE, ttl=CACHE_TTL) for topic in TOPICS}
+message_cache = {topic: None for topic in TOPICS}  # Store only the last message hash
 cache_lock = Lock()
 session_lock = Lock()
 
@@ -257,11 +257,19 @@ def worker_mazemov():
             logger.info(f"Hash calculation time: {(hash_time - parse_time)*1000:.2f}ms")
 
             with cache_lock:
-                if message_hash in message_cache[msg.topic]:
+                previous_hash = message_cache[msg.topic]
+                message_cache[msg.topic] = message_hash
+                if previous_hash == message_hash:
                     cache_check_time = time.time()
-                    logger.info(f"Cache check (duplicate found) time: {(cache_check_time - hash_time)*1000:.2f}ms")
+                    logger.info(f"Consecutive duplicate detected time: {(cache_check_time - hash_time)*1000:.2f}ms")
+                    failed_messages_col.insert_one({
+                        "topic": msg.topic,
+                        "payload": payload_dict,
+                        "error": "Duplicated Message",
+                        "hash": message_hash,
+                        "timestamp": datetime.now()
+                    })
                     continue
-                message_cache[msg.topic][message_hash] = True
             cache_time = time.time()
             logger.info(f"Cache operation time: {(cache_time - hash_time)*1000:.2f}ms")
 
@@ -273,7 +281,7 @@ def worker_mazemov():
             process_time = time.time()
             logger.info(f"Message processing time: {(process_time - session_time)*1000:.2f}ms")
             
-            total_time = (process_time - start_time) * 1000  # Convert to milliseconds
+            total_time = (process_time - start_time) * 1000
             logger.info(f"Total mazemov message handling time: {total_time:.2f}ms")
 
         except Exception as e:
@@ -306,11 +314,12 @@ def worker_mazesound():
             logger.info(f"Hash calculation time: {(hash_time - parse_time)*1000:.2f}ms")
 
             with cache_lock:
-                if message_hash in message_cache[msg.topic]:
+                previous_hash = message_cache[msg.topic]
+                message_cache[msg.topic] = message_hash
+                if previous_hash == message_hash:
                     cache_check_time = time.time()
-                    logger.info(f"Cache check (duplicate found) time: {(cache_check_time - hash_time)*1000:.2f}ms")
+                    logger.info(f"Consecutive duplicate detected time: {(cache_check_time - hash_time)*1000:.2f}ms")
                     continue
-                message_cache[msg.topic][message_hash] = True
             cache_time = time.time()
             logger.info(f"Cache operation time: {(cache_time - hash_time)*1000:.2f}ms")
 
@@ -322,7 +331,7 @@ def worker_mazesound():
             process_time = time.time()
             logger.info(f"Message processing time: {(process_time - session_time)*1000:.2f}ms")
             
-            total_time = (process_time - start_time) * 1000  # Convert to milliseconds
+            total_time = (process_time - start_time) * 1000
             logger.info(f"Total mazesound message handling time: {total_time:.2f}ms")
 
         except Exception as e:
@@ -335,9 +344,7 @@ def worker_mazesound():
                 "timestamp": datetime.now()
             })
         finally:
-            mazesound_queue.task_done()
-
-# --------------------------
+            mazesound_queue.task_done()# --------------------------
 # MQTT Callbacks
 # --------------------------
 def on_connect(client, userdata, flags, rc):
