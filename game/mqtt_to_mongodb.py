@@ -1,4 +1,4 @@
-import paho.mqtt.client as mqtt
+from paho.mqtt import client as mqtt_client  # Import for type hints and clarity
 import hashlib
 import logging
 from datetime import datetime
@@ -11,7 +11,7 @@ import os
 from pydantic import BaseModel, ValidationError, conint, confloat
 from cachetools import TTLCache
 from pymongo import MongoClient, errors, ReadPreference
-
+import pytz
 active_session_id = None
 
 # --------------------------
@@ -226,6 +226,11 @@ def handle_movement_message(session_id, payload_dict: dict, message_hash: str):
 
 def handle_sound_message(session_id, payload_dict: dict, message_hash: str):
     validated = MazesoundMessage(**payload_dict)
+    tz = pytz.timezone('UTC')
+    send_time = datetime.fromisoformat(payload_dict['Hour']).replace(tzinfo=tz)
+    process_time = datetime.now(tz)
+    latency = (process_time - send_time).total_seconds()
+    logger.critical(f"CURRENT LATENCY:  {latency}")
     doc = {
         "session_id": session_id,
         "player": validated.Player,
@@ -344,18 +349,28 @@ def worker_mazesound():
                 "timestamp": datetime.now()
             })
         finally:
-            mazesound_queue.task_done()# --------------------------
+            mazesound_queue.task_done()
+# --------------------------
 # MQTT Callbacks
 # --------------------------
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        logger.info(f"Connected to MQTT broker (code: {rc})")
+def on_connect(client: mqtt_client.Client, userdata, flags, reason_code, properties=None):
+    """
+    Callback for when the client connects to the broker.
+    Updated for Paho MQTT 2.0+ API.
+    """
+    if reason_code == 0:
+        logger.info("Connected to MQTT broker (code: 0 - Success)")
         for topic in TOPICS:
-            client.subscribe(topic, qos=1)
+            client.subscribe(topic, qos=0)
+            logger.info(f"Subscribed to topic: {topic}")
     else:
-        logger.error(f"Failed to connect to MQTT broker: {rc}")
+        logger.error(f"Failed to connect to MQTT broker: {reason_code}")
 
-def on_message(client, userdata, msg):
+def on_message(client: mqtt_client.Client, userdata, msg: mqtt_client.MQTTMessage):
+    """
+    Callback for when a message is received from the broker.
+    Updated for Paho MQTT 2.0+ API.
+    """
     try:
         payload = msg.payload.decode()
         if "mazemov" in msg.topic:
@@ -372,26 +387,39 @@ def on_message(client, userdata, msg):
         })
 
 # --------------------------
-# Main Execution
+# Main Execution (Updated for API 2.0+)
 # --------------------------
 def main():
+    # Start worker threads (unchanged)
     for _ in range(2):
         Thread(target=worker_mazemov, daemon=True).start()
         Thread(target=worker_mazesound, daemon=True).start()
     
-    client = mqtt.Client(client_id=f"player_{player_id}_monitor", clean_session=False)
+    # Create MQTT client with updated API
+    client = mqtt_client.Client(
+        client_id=f"player_{player_id}_monitor",
+        protocol=mqtt_client.MQTTv5,  # Explicitly use MQTT v5 (or MQTTv311 if preferred)
+        userdata=None
+    )
+    
+    # Assign callbacks
     client.on_connect = on_connect
     client.on_message = on_message
-    
+
+    # Configure connection options (optional, for better control)
+    client.reconnect_delay_set(min_delay=1, max_delay=5)  # Automatic reconnection
 
     while True:
         try:
             logger.info(f"Connecting to MQTT broker {MQTT_BROKER}:{MQTT_PORT}...")
-            client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+            client.connect(
+                MQTT_BROKER,
+                MQTT_PORT,
+            )
             client.loop_forever()
         except Exception as e:
             logger.error(f"MQTT connection error: {e}")
-            time.sleep(1)
+            time.sleep(1)  # Retry after delay
 
 if __name__ == "__main__":
     main()

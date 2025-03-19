@@ -91,7 +91,7 @@ services:
       - db-network
     environment:
       PLAYER_ID: "33"
-      MQTT_BROKER: broker.mqtt-dashboard.com
+      MQTT_BROKER: broker.hivemq.com
       MQTT_PORT: "1883"
       MOVEMENT_TOPIC: pisid_mazemov_33
       SOUND_TOPIC: pisid_mazesound_33
