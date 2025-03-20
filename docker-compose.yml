@@ -79,8 +79,30 @@ services:
     networks:
       - db-network
 
-  game_fixed:
-    build: ./game
+  # game_fixed:
+  #   build: ./game
+  #   depends_on:
+  #     - mongo1
+  #     - mongo2
+  #     - mongo3
+  #     - mysql
+  #     - mongoinit
+  #   networks:
+  #     - db-network
+  #   environment:
+  #     PLAYER_ID: "33"
+  #     # MQTT_BROKER: test.mosquitto.org
+  #     # MQTT_PORT: "1883"
+  #     # MOVEMENT_TOPIC: pisid_mazemov_33
+  #     # SOUND_TOPIC: pisid_mazesound_33
+  #     # MONGO_USER: admin
+  #     # MONGO_PASS: adminpass
+  #     # MONGO_DB: game_monitoring
+  #     # MONGO_AUTH_SOURCE: admin
+  #   restart: "unless-stopped"
+
+  mqtt_to_mongodb:
+    build: ./mqtt_to_mongo
     depends_on:
       - mongo1
       - mongo2
@@ -99,7 +121,19 @@ services:
       MONGO_PASS: adminpass
       MONGO_DB: game_monitoring
       MONGO_AUTH_SOURCE: admin
-    restart: "unless-stopped"
+    restart: always
+
+  # broker_test:
+  #   build: ./mongo_to_mysql_mqtt
+  #   depends_on:
+  #     - mongo1
+  #     - mongo2
+  #     - mongo3
+  #     - mysql
+  #     - mongoinit
+  #   networks:
+  #     - db-network
+  #   restart: always
 
   mysql:
     image: mysql:8

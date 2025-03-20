@@ -204,7 +204,9 @@ def handle_maze_novo():
         session_doc = {
             "player_id": player_id,
             "status": "active",
-            "created_at": datetime.now()
+            "created_at": datetime.now(),
+            "movement_messages": [],
+            "sound_messages": []
         }
         result = game_sessions_col.insert_one(session_doc)
         active_session_id = result.inserted_id
@@ -220,7 +222,9 @@ def handle_movement_message(session_id, payload_dict: dict, message_hash: str):
         "room_destiny": validated.RoomDestiny,
         "status": validated.Status,
         "timestamp": datetime.now(),
-        "message_hash": message_hash
+        "message_hash": message_hash,
+        "sent": "false",
+        "Already_moved":"false",
     }
     move_messages_col.insert_one(doc)
 
@@ -229,7 +233,7 @@ def handle_sound_message(session_id, payload_dict: dict, message_hash: str):
     tz = pytz.timezone('UTC')
     send_time = datetime.fromisoformat(payload_dict['Hour']).replace(tzinfo=tz)
     process_time = datetime.now(tz)
-    latency = (process_time - send_time).total_seconds()
+    latency = (process_time - send_time).total_seconds()*1000
     logger.critical(f"CURRENT LATENCY:  {latency}")
     doc = {
         "session_id": session_id,
@@ -237,7 +241,10 @@ def handle_sound_message(session_id, payload_dict: dict, message_hash: str):
         "sound_level": validated.Sound,
         "hour": validated.Hour,
         "timestamp": datetime.now(),
-        "message_hash": message_hash
+        "message_hash": message_hash,
+        "sent": "false",
+        "Already_moved":"false",
+
     }
     sound_messages_col.insert_one(doc)
 
@@ -252,7 +259,11 @@ def worker_mazemov():
             payload = msg.payload.decode().strip()
             decode_time = time.time()
             logger.info(f"Message decode time: {(decode_time - start_time)*1000:.2f}ms")
-
+            raw_messages_col.insert_one({
+                        "topic": msg.topic,
+                        "payload": payload,
+                        "timestamp": datetime.now()
+                    })
             payload_dict = parse_payload(payload)
             parse_time = time.time()
             logger.info(f"Payload parse time: {(parse_time - decode_time)*1000:.2f}ms")
@@ -307,6 +318,11 @@ def worker_mazesound():
         start_time = time.time()
         try:
             payload = msg.payload.decode().strip()
+            raw_messages_col.insert_one({
+                        "topic": msg.topic,
+                        "payload": payload,
+                        "timestamp": datetime.now()
+                    })
             decode_time = time.time()
             logger.info(f"Message decode time: {(decode_time - start_time)*1000:.2f}ms")
 
@@ -398,7 +414,7 @@ def main():
     # Create MQTT client with updated API
     client = mqtt_client.Client(
         client_id=f"player_{player_id}_monitor",
-        protocol=mqtt_client.MQTTv5,  # Explicitly use MQTT v5 (or MQTTv311 if preferred)
+        protocol=mqtt_client.MQTTv5,  
         userdata=None
     )
     
