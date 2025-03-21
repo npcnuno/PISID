@@ -1,0 +1,45 @@
+{
+  "mysql_cloud": {
+    "host": "194.210.86.10",
+    "user": "aluno",
+    "password": "aluno",
+    "database": "maze",
+    "port": 3306
+  },
+
+  "mysql_pc2": {
+    "host": "localhost",
+    "user": "root",
+    "password": "rootpass",
+    "database": "labirinto_mysql",
+    "port": 3306
+  },
+
+
+  "tables": {
+    "corridor": {
+      "columns": {
+        "Distance": "INT(11)",
+        "ID": "INT(11)",
+        "Rooma": "INT(11)",
+        "Roomb": "INT(11)"
+      }
+    },
+
+    "setupmaze": {
+      "columns": {
+        "normalnoise": "DECIMAL(4,2)",
+        "numberrooms": "INT(11)",
+        "numbermarsamis": "INT(11)",
+        "numberplayers": "INT(11)",
+        "frozentime": "INT(11)",
+        "delaytime": "INT(11)",
+        "timemarsamilive": "INT(11)",
+        "noisevartoleration": "DECIMAL(5,2)",
+        "step": "INT(11)",
+        "ID": "INT(11)",
+        "minutesstep": "DECIMAL(3,2)"
+      }
+    }
+  }
+}

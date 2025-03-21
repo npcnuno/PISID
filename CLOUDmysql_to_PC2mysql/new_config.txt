@@ -1,0 +1,122 @@
+{
+  "mysql_cloud": {
+    "host": "194.210.86.10",
+    "user": "aluno",
+    "password": "aluno",
+    "database": "maze",
+    "port": 3306
+  },
+  "mysql_pc2": {
+    "host": "localhost",
+    "user": "root",
+    "password": "rootpass",
+    "database": "labirinto_mysql",
+    "port": 3306
+  },
+  "tables": {
+    "corridor": {
+      "columns": {
+        "Rooma": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "Roomb": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "Distance": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "ID": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": "auto_increment"
+        }
+      },
+      "primary_key": "ID"
+    },
+    "setupmaze": {
+      "columns": {
+        "normalnoise": {
+          "type": "decimal(4,2)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "numberrooms": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "numbermarsamis": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "numberplayers": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "frozentime": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "delaytime": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "timemarsamilive": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "noisevartoleration": {
+          "type": "decimal(5,2)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "step": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": ""
+        },
+        "ID": {
+          "type": "int(11)",
+          "nullable": false,
+          "default": null,
+          "extra": "auto_increment"
+        },
+        "minutesstep": {
+          "type": "decimal(3,2)",
+          "nullable": true,
+          "default": null,
+          "extra": ""
+        }
+      },
+      "primary_key": "ID"
+    }
+  }
+}
+
+
+
+________________________________________________________________________________
