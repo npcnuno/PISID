@@ -130,7 +130,7 @@ def worker_mark_sent(db):
                     collection = move_messages_col if collection_name == "move_messages" else sound_messages_col
                     collection.update_one(
                         {"_id": message_id},
-                        {"$set": {"sent": "true"}}
+                        {"$set": {"processed": True}}
                     )
                     logger.info(f"Marked message {message_id} as sent after acknowledgment (MID {mid})")
         except errors.PyMongoError as e:
@@ -159,21 +159,21 @@ def mark_messages_as_sent(mongo_client, mqtt_client):
                 (move_messages_col, "move_messages"),
                 (sound_messages_col, "sound_messages")
             ]:
-                unsent_messages = collection.find({"sent": "false"})
+                unsent_messages = collection.find({"processed": False})
                 for message in unsent_messages:
                     message_id = message["_id"]
                     try:
                         # Prepare payload, excluding all timestamps except 'hour'
                         payload = {
                             k: v for k, v in message.items()
-                            if k not in ["_id", "session_id", "Already_moved", "sent", "sent_timestamp", "moved_timestamp", "timestamp"]
+                            if k not in ["_id", "session_id", "processed", "timestamp", ]
                         }
                         # Ensure 'hour' is included as a string for sound messages
-                        if message_type == "sound_messages" and "hour" in message:
-                            if isinstance(message["hour"], datetime):
-                                payload["hour"] = message["hour"].isoformat()
+                        if message_type == "sound_messages" and "Hour" in message:
+                            if isinstance(message["Hour"], datetime):
+                                payload["Hour"] = message["Hour"].isoformat()
                             else:
-                                payload["hour"] = str(message["hour"])  # Already a string from parse_payload
+                                payload["Hour"] = str(message["Hour"])  # Already a string from parse_payload
                         
                         # Queue the message for publishing
                         with queue_lock:
