@@ -20,7 +20,7 @@ MONGO_AUTH_SOURCE = os.getenv('MONGO_AUTH_SOURCE', 'admin')
 MONGO_URI = (
     f"mongodb://{MONGO_USER}:{MONGO_PASS}@mongo1:27017,mongo2:27017,mongo3:27017/"
     f"{MONGO_DB}?replicaSet=my-mongo-set&authSource={MONGO_AUTH_SOURCE}&"
-    f"w=1&journal=false&retryWrites=true&"
+    f"w=1&journal=true&retryWrites=true&"
     f"connectTimeoutMS=5000&socketTimeoutMS=5000&serverSelectionTimeoutMS=5000&"
     f"readPreference=primaryPreferred"
 )
@@ -54,7 +54,7 @@ def connect_to_mongodb(retry_count=5, retry_delay=5):
             mongo_client.admin.command('ping')
             logger.info("Connected to MongoDB replica set")
             db = mongo_client[MONGO_DB]
-            return True
+            return mongo_client
         except errors.PyMongoError as e:
             logger.error(f"Connection failed (attempt {attempt+1}/{retry_count}): {e}")
             if attempt < retry_count - 1:
@@ -172,7 +172,7 @@ def mark_messages_as_sent(mongo_client, mqtt_client):
                         # Prepare payload, excluding all timestamps except 'hour'
                         payload = {
                             k: v for k, v in message.items()
-                            if k not in ["_id", "session_id", "processed", "timestamp", ]
+                            if k not in ["_id", "session_id", "processed", "timestamp"]
                         }
                         # Ensure 'hour' is included as a string for sound messages
                         if message_type == "sound_messages" and "Hour" in message:

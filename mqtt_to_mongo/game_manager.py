@@ -26,16 +26,28 @@ MONGO_URI = (
     f"mongodb://{MONGO_USER}:{MONGO_PASS}@"
     f"mongo1:27017,mongo2:27017,mongo3:27017/"
     f"{MONGO_DB}?replicaSet=my-mongo-set&"
-    f"authSource={MONGO_AUTH_SOURCE}&w=1&journal=false&"
+    f"authSource={MONGO_AUTH_SOURCE}&w=1&journal=true&"
     f"retryWrites=true&connectTimeoutMS=5000&socketTimeoutMS=5000&"
     f"serverSelectionTimeoutMS=5000&readPreference=primaryPreferred"
 )
 CHECK_INTERVAL = 5  # Seconds to check process status
 
-# MongoDB Setup
-mongo_client = None
+# Process management
+processes = {}  # {player_id: {"raw": {"proc": Process, "out_q": Queue, "err_q": Queue}, "proc": {...}, "send": {...}}}
+lock = threading.Lock()
+
 def connect_to_mongodb(retry_count=5, retry_delay=5):
-    global mongo_client, db
+    """Purpose: Establishes a connection to MongoDB with retry logic to handle temporary failures.
+    Execution Flow:
+    1. Declare the global game_sessions_col variable to be set upon successful connection.
+    2. Loop through retry_count attempts (default 5) to connect to MongoDB.
+    3. For each attempt, create a MongoClient instance with MONGO_URI and specified settings (e.g., maxPoolSize=20, retryWrites=True).
+    4. Send a 'ping' command to the admin database to verify connectivity.
+    5. If successful, log the connection, set the game_sessions collection, and return True.
+    6. If an error occurs (PyMongoError), log the failure with attempt number and exception details.
+    7. If not the last attempt, wait retry_delay seconds (default 5) before retrying.
+    8. If all attempts fail, log a final error and raise SystemExit to terminate the program."""
+    global game_sessions_col
     for attempt in range(retry_count):
         try:
             mongo_client = MongoClient(
@@ -48,6 +60,7 @@ def connect_to_mongodb(retry_count=5, retry_delay=5):
             mongo_client.admin.command('ping')
             logger.info("Connected to MongoDB replica set")
             db = mongo_client[MONGO_DB]
+            game_sessions_col = db["game_sessions"]
             return True
         except errors.PyMongoError as e:
             logger.error(f"Connection failed (attempt {attempt+1}/{retry_count}): {e}")
@@ -56,43 +69,51 @@ def connect_to_mongodb(retry_count=5, retry_delay=5):
     logger.error("Failed to connect to MongoDB")
     raise SystemExit(1)
 
-connect_to_mongodb()
-game_sessions_col = db["game_sessions"]
-
-# Process management
-processes = {}  # {player_id: {"raw": {"proc": Process, "out_q": Queue, "err_q": Queue}, "proc": {...}, "send": {...}}}
-lock = threading.Lock()
-
 def log_subprocess_output(proc, out_queue, err_queue, player_id, proc_name):
-    """Read subprocess stdout and stderr in real-time and log them."""
+    """Purpose: Reads and logs subprocess stdout and stderr in real-time for monitoring and debugging.
+    Execution Flow:
+    1. Define a nested function read_output to continuously read lines from a pipe (stdout or stderr).
+    2. In read_output, iterate over pipe lines, queue each line with a logging level and prefix, and close the pipe when done.
+    3. Create two daemon threads: one for stdout and one for stderr, passing the respective pipes, queues, and prefixes.
+    4. Start both threads to begin reading output concurrently.
+    5. Enter an infinite loop to process queued messages from out_queue and err_queue.
+    6. For each queue, attempt to get a message within a 1-second timeout.
+    7. If a message is retrieved, log it at the specified level (INFO) and print it to stdout for Docker logs.
+    8. Mark the task as done in the queue.
+    9. If the queue is empty (timeout), check if the process has terminated (proc.poll() is not None); if so, exit the loop."""
     def read_output(pipe, q, level, prefix):
         for line in iter(pipe.readline, ''):
             q.put((level, f"{prefix}: {line.strip()}"))
         pipe.close()
-
     out_thread = threading.Thread(target=read_output, args=(proc.stdout, out_queue, logging.INFO, f"{player_id}/{proc_name}/stdout"), daemon=True)
     err_thread = threading.Thread(target=read_output, args=(proc.stderr, err_queue, logging.INFO, f"{player_id}/{proc_name}/stderr"), daemon=True)
     out_thread.start()
     err_thread.start()
-
     while True:
         try:
             level, message = out_queue.get(timeout=1)
             logger.log(level, message)
-            print(message)  # Also print to stdout for Docker logs
+            print(message)
             out_queue.task_done()
         except queue.Empty:
             pass
         try:
             level, message = err_queue.get(timeout=1)
             logger.log(level, message)
-            print(message)  # Also print to stdout for Docker logs
+            print(message)
             err_queue.task_done()
         except queue.Empty:
             if proc.poll() is not None:
-                break  # Exit if process has terminated
+                break
 
 def start_scripts(player_id, mqtt_config):
+    """Purpose: Initiates a new game session for a player by starting subprocesses if no active session exists.
+    Execution Flow:
+    1. Query MongoDB to check for an existing active session for the given player_id.
+    2. If an active session is found, log a warning and return without starting new scripts.
+    3. Create a session document with player_id, 'active' status, current timestamp, and mqtt_config.
+    4. Insert the session document into game_sessions_col and retrieve the generated session_id.
+    5. Call start_processes with player_id, session_id, and mqtt_config to launch subprocesses."""
     existing_session = game_sessions_col.find_one({"player_id": player_id, "status": "active"})
     if existing_session:
         logger.warning(f"Player {player_id} already has an active session, cannot start a new one")
@@ -107,8 +128,17 @@ def start_scripts(player_id, mqtt_config):
     session_id = str(result.inserted_id)
     start_processes(player_id, session_id, mqtt_config)
 
-
 def start_processes(player_id, session_id, mqtt_config):
+    """Purpose: Launches subprocesses for raw message handling, processing, and sending for a player session.
+    Execution Flow:
+    1. Acquire a lock to ensure thread-safe access to the processes dictionary.
+    2. Check if processes are already running for the player_id; if so, log and return.
+    3. Copy the current environment and set variables (PLAYER_ID, SESSION_ID, MQTT details, MONGO_URI).
+    4. Create queues for stdout and stderr for each subprocess (raw, proc, send).
+    5. Launch three subprocesses (raw_messages.py, message_processor.py, send_messages.py) with Popen, passing the environment.
+    6. Store process details in the processes dictionary with player_id as the key.
+    7. Start threads to log output for each subprocess using log_subprocess_output.
+    8. Log the start of scripts for the player and session."""
     with lock:
         if player_id in processes:
             logger.info(f"Processes already running for player {player_id}")
@@ -129,28 +159,13 @@ def start_processes(player_id, session_id, mqtt_config):
         send_err_q = queue.Queue()
         
         raw_proc = subprocess.Popen(
-            ["python", "raw_messages.py"],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1
+            ["python", "raw_messages.py"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
         )
         proc_proc = subprocess.Popen(
-            ["python", "message_processor.py"],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1
+            ["python", "message_processor.py"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
         )
         send_proc = subprocess.Popen(
-            ["python", "send_messages.py"],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1
+            ["python", "send_messages.py"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
         )
         
         processes[player_id] = {
@@ -166,14 +181,22 @@ def start_processes(player_id, session_id, mqtt_config):
         logger.info(f"Started scripts for player {player_id} with session {session_id}")
 
 def stop_scripts(player_id):
-    """Stop scripts for the active session of a player and close the session by session_id."""
+    """Purpose: Stops subprocesses for a player's active session and updates the session status in MongoDB.
+    Execution Flow:
+    1. Query MongoDB for an active session for the player_id.
+    2. Acquire a lock to safely access the processes dictionary.
+    3. If no processes are running for the player_id, log and return.
+    4. If no active session exists but processes are running, terminate them and remove from processes.
+    5. Otherwise, get the session_id and iterate through processes (raw, proc, send).
+    6. For each process, terminate it if still running, wait up to 5 seconds, and kill if necessary.
+    7. Log each process stop and remove the player_id entry from processes.
+    8. Update the session in MongoDB to 'closed' with the current end_time.
+    9. Log the session closure."""
     active_session = game_sessions_col.find_one({"player_id": player_id, "status": "active"})
-
     with lock:
         if player_id not in processes:
             logger.info(f"No running scripts for player {player_id}")
             return
-
         if not active_session:
             logger.info(f"No active session found for player {player_id}, cleaning up processes")
             if player_id in processes:
@@ -192,7 +215,6 @@ def stop_scripts(player_id):
                     logger.info(f"Stopped {proc_name} for player {player_id}")
                 del processes[player_id]
             return
-
         session_id = processes[player_id]["session_id"]
         procs = processes[player_id]
         for proc_name, proc_data in procs.items():
@@ -207,9 +229,7 @@ def stop_scripts(player_id):
                     proc.kill()
                     logger.warning(f"Forced kill of {proc_name} for player {player_id}")
             logger.info(f"Stopped {proc_name} for player {player_id}")
-
         del processes[player_id]
-
     game_sessions_col.update_one(
         {"_id": ObjectId(session_id)},
         {"$set": {"status": "closed", "end_time": datetime.now()}}
@@ -217,9 +237,18 @@ def stop_scripts(player_id):
     logger.info(f"Closed session {session_id} for player {player_id} in MongoDB")
 
 def monitor_processes():
-    """Monitor and restart crashed processes with a limit."""
-    restart_counts = {}  # {player_id_proc_name: count}
-    max_restarts = 5
+    """Purpose: Monitors subprocesses and restarts crashed ones up to a maximum restart limit.
+    Execution Flow:
+    1. Initialize a restart_counts dictionary to track restarts per process.
+    2. Enter an infinite loop to periodically check processes every CHECK_INTERVAL seconds.
+    3. Acquire a lock to safely iterate over processes.
+    4. For each player_id and process, check if it has terminated (poll() is not None).
+    5. If terminated, increment restart count and log the crash with exit code.
+    6. If restart count exceeds max_restarts (10), close the session and remove processes.
+    7. Otherwise, retrieve session details, prepare environment, and restart the crashed process.
+    8. Update processes dictionary and start a logging thread for the new process."""
+    restart_counts = {}
+    max_restarts = 10
     while True:
         with lock:
             for player_id, procs in list(processes.items()):
@@ -251,21 +280,12 @@ def monitor_processes():
                             env["MQTT_PORT"] = str(mqtt_config["port"])
                             env["TOPICS"] = json.dumps(mqtt_config["topics"])
                             env["MONGO_URI"] = MONGO_URI
-                            script_map = {
-                                "raw": "raw_messages.py",
-                                "proc": "message_processor.py",
-                                "send": "send_messages.py"
-                            }
+                            script_map = {"raw": "raw_messages.py", "proc": "message_processor.py", "send": "send_messages.py"}
                             script_name = script_map[proc_name]
                             out_q = queue.Queue()
                             err_q = queue.Queue()
                             new_proc = subprocess.Popen(
-                                ["python", script_name],
-                                env=env,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                bufsize=1
+                                ["python", script_name], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
                             )
                             procs[proc_name] = {"proc": new_proc, "out_q": out_q, "err_q": err_q}
                             threading.Thread(target=log_subprocess_output, args=(new_proc, out_q, err_q, player_id, proc_name), daemon=True).start()
@@ -273,13 +293,18 @@ def monitor_processes():
         time.sleep(CHECK_INTERVAL)
 
 def on_message(client, userdata, msg):
-    """Handle incoming MQTT messages."""
+    """Purpose: Handles incoming MQTT messages to start or stop player sessions.
+    Execution Flow:
+    1. Decode the MQTT message payload and parse it as JSON.
+    2. Extract 'action', 'player_id', and 'mqtt_config' from the payload.
+    3. If action is 'start' and required fields are present, call start_scripts.
+    4. If action is 'stop' and player_id is present, call stop_scripts.
+    5. Otherwise, log a warning for an invalid message."""
     try:
         payload = json.loads(msg.payload.decode())
         action = payload.get("action")
         player_id = payload.get("player_id")
         mqtt_config = payload.get("mqtt_config")
-        
         if action == "start" and player_id and mqtt_config:
             start_scripts(player_id, mqtt_config)
         elif action == "stop" and player_id:
@@ -290,6 +315,13 @@ def on_message(client, userdata, msg):
         logger.error(f"Error processing message: {e}")
 
 def load_active_sessions():
+    """Purpose: Loads and resumes active sessions from MongoDB on startup.
+    Execution Flow:
+    1. Query MongoDB for all sessions with 'active' status.
+    2. For each active session, extract player_id, session_id, and mqtt_config.
+    3. Call start_processes to resume subprocesses for the session.
+    4. Log the resumption of each session.
+    5. On MongoDB error, log the failure and raise an exception to halt startup."""
     try:
         active_sessions = game_sessions_col.find({"status": "active"})
         for session in active_sessions:
@@ -303,7 +335,13 @@ def load_active_sessions():
         raise
 
 def connect_mqtt():
-    """Initialize and connect MQTT client for game manager."""
+    """Purpose: Initializes and connects an MQTT client for game management commands.
+    Execution Flow:
+    1. Create an MQTT client with a fixed client_id 'game_manager'.
+    2. Define on_connect callback to log connection status and subscribe to 'pisid_maze/mazeManager/#' with QoS 1.
+    3. Set on_message callback to the on_message function.
+    4. Connect to the MQTT broker at test.mosquitto.org:1883.
+    5. Return the connected client."""
     client = mqtt_client.Client(client_id="game_manager")
     def on_connect(c, u, f, rc):
         logger.info(f"Connected with result code {rc}")
@@ -314,19 +352,18 @@ def connect_mqtt():
     return client
 
 def main():
-    """Main function to start MQTT client and load active sessions."""
+    """Purpose: Orchestrates the startup and continuous operation of the game manager.
+    Execution Flow:
+    1. Call connect_to_mongodb to establish a database connection.
+    2. Call load_active_sessions to resume any existing active sessions.
+    3. Copy the environment and launch archive_messages.py as a subprocess for background archiving.
+    4. Start a daemon thread to monitor subprocesses for crashes.
+    5. Call connect_mqtt to set up the MQTT client.
+    6. Enter an infinite loop with client.loop_forever() to process MQTT messages."""
     connect_to_mongodb()
     load_active_sessions()
-    
     env = os.environ.copy()
-    subprocess.Popen(
-                                ["python", "archive_messages.py"],
-                                env=env,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                bufsize=1
-                            )
+    subprocess.Popen(["python", "archive_messages.py"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
     threading.Thread(target=monitor_processes, daemon=True).start()
     client = connect_mqtt()
     client.loop_forever()
