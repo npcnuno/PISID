@@ -40,21 +40,27 @@ publish_queue = queue.Queue()  # For sending messages to MQTT
 sent_queue = queue.Queue()     # For marking messages as sent
 queue_lock = Lock()
 
-def connect_to_mongodb():
-    """Connect to MongoDB with retry logic"""
-    while True:
-        for attempt in range(5):
-            try:
-                client = MongoClient(MONGO_URI, maxPoolSize=1, minPoolSize=1)
-                client.admin.command('ping')
-                logger.info("Connected to MongoDB replica set")
-                return client
-            except errors.PyMongoError as e:
-                logger.error(f"Connection attempt {attempt+1}/5 failed: {e}")
-                if attempt < 4:
-                    time.sleep(5)
-        logger.error("Failed to reconnect to MongoDB, retrying in 5 seconds")
-        time.sleep(5)
+def connect_to_mongodb(retry_count=5, retry_delay=5):
+    global mongo_client, db
+    for attempt in range(retry_count):
+        try:
+            mongo_client = MongoClient(
+                MONGO_URI,
+                maxPoolSize=20, minPoolSize=1,
+                connectTimeoutMS=5000, socketTimeoutMS=5000,
+                serverSelectionTimeoutMS=5000, retryWrites=True,
+                authMechanism='SCRAM-SHA-256'
+            )
+            mongo_client.admin.command('ping')
+            logger.info("Connected to MongoDB replica set")
+            db = mongo_client[MONGO_DB]
+            return True
+        except errors.PyMongoError as e:
+            logger.error(f"Connection failed (attempt {attempt+1}/{retry_count}): {e}")
+            if attempt < retry_count - 1:
+                time.sleep(retry_delay)
+    logger.error("Failed to connect to MongoDB")
+    raise SystemExit( 1)
 
 def connect_to_mqtt():
     """Connect to MQTT broker"""

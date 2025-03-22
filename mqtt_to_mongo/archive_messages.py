@@ -36,7 +36,7 @@ def connect_to_mongodb(retry_count=5, retry_delay=5):
         try:
             mongo_client = MongoClient(
                 MONGO_URI,
-                maxPoolSize=1, minPoolSize=1,
+                maxPoolSize=5, minPoolSize=1,
                 connectTimeoutMS=5000, socketTimeoutMS=5000,
                 serverSelectionTimeoutMS=5000, retryWrites=True,
                 authMechanism='SCRAM-SHA-256'

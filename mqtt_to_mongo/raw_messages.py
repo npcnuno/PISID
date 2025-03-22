@@ -3,7 +3,7 @@ import threading
 import queue
 from datetime import datetime
 from paho.mqtt import client as mqtt_client
-from pymongo import MongoClient
+from pymongo import MongoClient, errors 
 import logging
 import time
 SESSION_ID = os.getenv('SESSION_ID')
@@ -20,10 +20,45 @@ TOPICS = [
     os.getenv('MOVEMENT_TOPIC', f'pisid_mazemov_{player_id}'),
     os.getenv('SOUND_TOPIC', f'pisid_mazesound_{player_id}')
 ]
-MONGO_URI = os.getenv('MONGO_URI', 'mongodb://admin:adminpass@mongo1:27017,mongo2:27017,mongo3:27017/game_monitoring?replicaSet=my-mongo-set&authSource=admin')
+# MongoDB setup
+MONGO_USER = os.getenv('MONGO_USER', 'admin')
+MONGO_PASS = os.getenv('MONGO_PASS', 'adminpass')
+MONGO_DB = os.getenv('MONGO_DB', 'game_monitoring')
+MONGO_AUTH_SOURCE = os.getenv('MONGO_AUTH_SOURCE', 'admin')
+
+MONGO_URI = (
+    f"mongodb://{MONGO_USER}:{MONGO_PASS}@"
+    f"mongo1:27017,mongo2:27017,mongo3:27017/"
+    f"{MONGO_DB}?replicaSet=my-mongo-set&"
+    f"authSource={MONGO_AUTH_SOURCE}&w=1&journal=false&"
+    f"retryWrites=true&connectTimeoutMS=5000&socketTimeoutMS=5000&"
+    f"serverSelectionTimeoutMS=5000&readPreference=primaryPreferred"
+)
+def connect_to_mongodb(retry_count=5, retry_delay=5):
+    global mongo_client, db
+    for attempt in range(retry_count):
+        try:
+            mongo_client = MongoClient(
+                MONGO_URI,
+                maxPoolSize=20, minPoolSize=1,
+                connectTimeoutMS=5000, socketTimeoutMS=5000,
+                serverSelectionTimeoutMS=5000, retryWrites=True,
+                authMechanism='SCRAM-SHA-256'
+            )
+            mongo_client.admin.command('ping')
+            logger.info("Connected to MongoDB replica set")
+            db = mongo_client[MONGO_DB]
+            return True
+        except errors.PyMongoError as e:
+            logger.error(f"Connection failed (attempt {attempt+1}/{retry_count}): {e}")
+            if attempt < retry_count - 1:
+                time.sleep(retry_delay)
+    logger.error("Failed to connect to MongoDB")
+    raise SystemExit( 1)
+
+connect_to_mongodb()
 
 # MongoDB setup
-mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["game_monitoring"]
 raw_messages_col = db["raw_messages"]
 failed_messages_col = db["failed_messages"]
