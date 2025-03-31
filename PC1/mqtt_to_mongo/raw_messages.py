@@ -24,14 +24,13 @@ MONGO_USER = os.getenv('MONGO_USER', 'admin')
 MONGO_PASS = os.getenv('MONGO_PASS', 'adminpass')
 MONGO_DB = os.getenv('MONGO_DB', 'game_monitoring')
 MONGO_AUTH_SOURCE = os.getenv('MONGO_AUTH_SOURCE', 'admin')
-MONGO_URI = (
-    f"mongodb://{MONGO_USER}:{MONGO_PASS}@"
-    f"mongo1:27017,mongo2:27017,mongo3:27017/"
-    f"{MONGO_DB}?replicaSet=my-mongo-set&"
-    f"authSource={MONGO_AUTH_SOURCE}&w=1&journal=true&"
-    f"retryWrites=true&connectTimeoutMS=5000&socketTimeoutMS=5000&"
-    f"serverSelectionTimeoutMS=5000&readPreference=primaryPreferred"
-)
+MONGO_URI = os.getenv('MONGO_URI', (
+    f"mongodb://{MONGO_USER}:{MONGO_PASS}@mongo1:27017,mongo2:27017,mongo3:27017/"
+    f"{MONGO_DB}?replicaSet=my-mongo-set&authSource={MONGO_AUTH_SOURCE}&"
+    f"w=1&journal=true&retryWrites=true&"
+    f"connectTimeoutMS=5000&socketTimeoutMS=5000&serverSelectionTimeoutMS=5000&"
+    f"readPreference=primaryPreferred"
+))
 
 # Topic-specific queues and threads
 topic_queues = {topic: queue.Queue() for topic in TOPICS}
@@ -90,7 +89,7 @@ def connect_mqtt(topic: str) -> mqtt_client.Client:
     client = mqtt_client.Client(client_id=client_id)
     def on_connect(c, u, f, rc):
         logger.info(f"Client for topic {topic} connected with result code {rc}")
-        c.subscribe(topic, qos=1)
+        c.subscribe(topic, qos=2)
     def on_message(c, u, msg):
         topic_queues[topic].put(msg)
     client.on_connect = on_connect

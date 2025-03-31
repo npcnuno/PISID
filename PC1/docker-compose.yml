@@ -1,0 +1,116 @@
+services:
+  mongo1:
+    image: mongo:latest
+    hostname: mongo1
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=adminpass
+    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
+    volumes:
+      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+      - mongo1_data:/data/db
+    ports:
+      - "30001:27017"
+    networks:
+      - db-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  mongo2:
+    image: mongo:latest
+    hostname: mongo2
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=adminpass
+    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
+    volumes:
+      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+      - mongo2_data:/data/db
+    ports:
+      - "30002:27017"
+    networks:
+      - db-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  mongo3:
+    image: mongo:latest
+    hostname: mongo3
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=adminpass
+    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
+    volumes:
+      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+      - mongo3_data:/data/db
+    ports:
+      - "30003:27017"
+    networks:
+      - db-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  mongoinit:
+    image: mongo:latest
+    depends_on:
+      - mongo1
+      - mongo2
+      - mongo3
+    command: >
+      bash -c "
+        echo 'Waiting for MongoDB instances...'
+        until mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
+              mongosh --host mongo2:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
+              mongosh --host mongo3:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")'; do
+          echo 'Waiting...'
+          sleep 5
+        done
+        echo 'Initiating replica set...'
+        mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval '
+          rs.initiate({
+            _id: \"my-mongo-set\",
+            members: [
+              {_id: 0, host: \"mongo1:27017\", priority: 3},
+              {_id: 1, host: \"mongo2:27017\", priority: 2},
+              {_id: 2, host: \"mongo3:27017\", priority: 1}
+            ]
+          });
+          while (rs.status().ok !== 1) {
+            sleep(1000);
+            print(\"Waiting for replica set...\");
+          }
+          print(\"Replica set initialized!\");
+        '
+      "
+    networks:
+      - db-network
+
+  mqtt_to_mongodb:
+    build: ./mqtt_to_mongo
+    depends_on:
+      - mongoinit
+    networks:
+      - db-network
+    environment:
+      PLAYER_ID: "33"
+      MQTT_BROKER: broker.hivemq.com
+      MQTT_PORT: "1883"
+      MOVEMENT_TOPIC: pisid_mazemov_33
+      SOUND_TOPIC: pisid_mazesound_33
+      MONGO_URI: "mongodb://admin:adminpass@mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=my-mongo-set&authSource=admin"
+      MONGO_USER: admin
+      MONGO_PASS: adminpass
+      MONGO_DB: game_monitoring
+      MONGO_AUTH_SOURCE: admin
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+
+networks:
+  db-network:
+    driver: bridge
+
+volumes:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:

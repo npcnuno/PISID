@@ -1,0 +1,19 @@
+services:
+  mysql:
+    image: mysql:8
+    container_name: mysql
+    networks:
+      - db-network
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: labirinto_mysql
+      MYSQL_USER: labuser
+      MYSQL_PASSWORD: labpass
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./initdb:/docker-entrypoint-initdb.d
+
+volumes:
+  mysql_data:

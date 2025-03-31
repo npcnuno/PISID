@@ -15,14 +15,15 @@ MONGO_USER = os.getenv('MONGO_USER', 'admin')
 MONGO_PASS = os.getenv('MONGO_PASS', 'adminpass')
 MONGO_DB = os.getenv('MONGO_DB', 'game_monitoring')
 MONGO_AUTH_SOURCE = os.getenv('MONGO_AUTH_SOURCE', 'admin')
-MONGO_URI = (
-    f"mongodb://{MONGO_USER}:{MONGO_PASS}@"
-    f"mongo1:27017,mongo2:27017,mongo3:27017/"
-    f"{MONGO_DB}?replicaSet=my-mongo-set&"
-    f"authSource={MONGO_AUTH_SOURCE}&w=1&journal=true&"
-    f"retryWrites=true&connectTimeoutMS=5000&socketTimeoutMS=5000&"
-    f"serverSelectionTimeoutMS=5000&readPreference=primaryPreferred"
-)
+MONGO_URI = os.getenv('MONGO_URI', (
+    f"mongodb://{MONGO_USER}:{MONGO_PASS}@mongo1:27017,mongo2:27017,mongo3:27017/"
+    f"{MONGO_DB}?replicaSet=my-mongo-set&authSource={MONGO_AUTH_SOURCE}&"
+    f"w=1&journal=true&retryWrites=true&"
+    f"connectTimeoutMS=5000&socketTimeoutMS=5000&serverSelectionTimeoutMS=5000&"
+    f"readPreference=primaryPreferred"
+))
+
+
 CHECK_INTERVAL = 5  # Seconds to check process status
 BATCH_SIZE = 100  # Number of documents to process per batch
 POLL_INTERVAL = 10  # Seconds between batch checks (low priority)

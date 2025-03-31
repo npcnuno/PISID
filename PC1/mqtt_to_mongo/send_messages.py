@@ -17,13 +17,13 @@ MONGO_USER = os.getenv('MONGO_USER', 'admin')
 MONGO_PASS = os.getenv('MONGO_PASS', 'adminpass')
 MONGO_DB = os.getenv('MONGO_DB', 'game_monitoring')
 MONGO_AUTH_SOURCE = os.getenv('MONGO_AUTH_SOURCE', 'admin')
-MONGO_URI = (
+MONGO_URI = os.getenv('MONGO_URI', (
     f"mongodb://{MONGO_USER}:{MONGO_PASS}@mongo1:27017,mongo2:27017,mongo3:27017/"
     f"{MONGO_DB}?replicaSet=my-mongo-set&authSource={MONGO_AUTH_SOURCE}&"
     f"w=1&journal=true&retryWrites=true&"
     f"connectTimeoutMS=5000&socketTimeoutMS=5000&serverSelectionTimeoutMS=5000&"
     f"readPreference=primaryPreferred"
-)
+))
 
 # MQTT Configuration
 MQTT_BROKER = "test.mosquitto.org"
@@ -33,7 +33,7 @@ MQTT_TOPICS = {
     "move_messages": f"pisid_mazemov_{PLAYER_ID}_processed",
     "sound_messages": f"pisid_mazesound_{PLAYER_ID}_processed"
 }
-QOS = 1  # At-least-once delivery
+QOS = 2  # At-least-once delivery
 
 # Message Queues
 publish_queue = queue.Queue()  # For sending messages to MQTT

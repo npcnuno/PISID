@@ -17,19 +17,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration Settings
+
+# MongoDB Configuration
 MONGO_USER = os.getenv('MONGO_USER', 'admin')
 MONGO_PASS = os.getenv('MONGO_PASS', 'adminpass')
 MONGO_DB = os.getenv('MONGO_DB', 'game_monitoring')
 MONGO_AUTH_SOURCE = os.getenv('MONGO_AUTH_SOURCE', 'admin')
-MONGO_URI = (
-    f"mongodb://{MONGO_USER}:{MONGO_PASS}@"
-    f"mongo1:27017,mongo2:27017,mongo3:27017/"
-    f"{MONGO_DB}?replicaSet=my-mongo-set&"
-    f"authSource={MONGO_AUTH_SOURCE}&w=1&journal=true&"
-    f"retryWrites=true&connectTimeoutMS=5000&socketTimeoutMS=5000&"
-    f"serverSelectionTimeoutMS=5000&readPreference=primaryPreferred"
-)
+
+# Use the MONGO_URI from environment variables if available, otherwise build it
+MONGO_URI = os.getenv('MONGO_URI', (
+    f"mongodb://{MONGO_USER}:{MONGO_PASS}@mongo1:27017,mongo2:27017,mongo3:27017/"
+    f"{MONGO_DB}?replicaSet=my-mongo-set&authSource={MONGO_AUTH_SOURCE}&"
+    f"w=1&journal=true&retryWrites=true&"
+    f"connectTimeoutMS=5000&socketTimeoutMS=5000&serverSelectionTimeoutMS=5000&"
+    f"readPreference=primaryPreferred"
+))
+
 CHECK_INTERVAL = 5  # Seconds to check process status
 
 # Process management
@@ -37,19 +40,10 @@ processes = {}  # {player_id: {"raw": {"proc": Process, "out_q": Queue, "err_q":
 lock = threading.Lock()
 
 def connect_to_mongodb(retry_count=5, retry_delay=5):
-    """Purpose: Establishes a connection to MongoDB with retry logic to handle temporary failures.
-    Execution Flow:
-    1. Declare the global game_sessions_col variable to be set upon successful connection.
-    2. Loop through retry_count attempts (default 5) to connect to MongoDB.
-    3. For each attempt, create a MongoClient instance with MONGO_URI and specified settings (e.g., maxPoolSize=20, retryWrites=True).
-    4. Send a 'ping' command to the admin database to verify connectivity.
-    5. If successful, log the connection, set the game_sessions collection, and return True.
-    6. If an error occurs (PyMongoError), log the failure with attempt number and exception details.
-    7. If not the last attempt, wait retry_delay seconds (default 5) before retrying.
-    8. If all attempts fail, log a final error and raise SystemExit to terminate the program."""
-    global game_sessions_col
+    global mongo_client, db, game_sessions_col
     for attempt in range(retry_count):
         try:
+            logger.info(f"Attempting to connect to MongoDB: {MONGO_URI}")
             mongo_client = MongoClient(
                 MONGO_URI,
                 maxPoolSize=20, minPoolSize=1,
@@ -57,11 +51,12 @@ def connect_to_mongodb(retry_count=5, retry_delay=5):
                 serverSelectionTimeoutMS=5000, retryWrites=True,
                 authMechanism='SCRAM-SHA-256'
             )
+            # Test the connection
             mongo_client.admin.command('ping')
             logger.info("Connected to MongoDB replica set")
             db = mongo_client[MONGO_DB]
             game_sessions_col = db["game_sessions"]
-            return True
+            return mongo_client
         except errors.PyMongoError as e:
             logger.error(f"Connection failed (attempt {attempt+1}/{retry_count}): {e}")
             if attempt < retry_count - 1:
