@@ -56,6 +56,8 @@ latency_lock = threading.Lock()
 last_latency: Optional[float] = None
 mazemov_threads = []
 mazesound_threads = []
+last_valid_timestamp = None  # Tracks the last valid or estimated timestamp (as a float)
+typical_interval = 5  # Seconds, adjust based on expected message frequency
 # Pydantic Models
 class MazemovMessage(BaseModel):
     Player: conint(ge=1)
@@ -287,28 +289,14 @@ def worker_mazemov():
         finally:
             mazemov_queue.task_done()
 
+
+
 def worker_mazesound():
-    """Purpose: Processes mazesound messages, validates them, calculates latency, and stores in sound_messages.
-    Execution Flow:
-    1. Enter an infinite loop to process messages from mazesound_queue.
-    2. Get a message (blocks until available); break if None (shutdown signal).
-    3. Log the start of processing for this message.
-    4. Extract payload and topic, compute a SHA256 hash.
-    5. Get player_id from topic; raise ValueError if None.
-    6. Parse payload and validate player_id consistency.
-    7. Try to validate with MazesoundMessage; on ValidationError, adjust Player or Hour if possible.
-    8. Calculate latency from send_time to process_time.
-    9. Create a document with validated data, latency, and hash.
-    10. Insert into sound_messages_col and mark raw message as processed (non-transactional).
-    11. Log processing time.
-    12. On error, log and insert into failed_messages_col.
-    13. Mark task as done."""
-    global last_latency
+    global last_valid_timestamp
     while True:
         msg = mazesound_queue.get()
-        if msg is None:
+        if msg is None:  
             break
-        logger.info(f"Processing mazesound message {msg['_id']}")
         try:
             payload = msg["payload"]
             topic = msg["topic"]
@@ -317,33 +305,34 @@ def worker_mazesound():
                 raise ValueError("Invalid topic, cannot extract player_id")
             message_hash = hashlib.sha256(payload.encode()).hexdigest()
             payload_dict = parse_payload(payload)
+            sound = payload_dict.get("Sound")
             if payload_dict.get("Player") != player_id:
-                raise ValueError(f"Player in payload ({payload_dict.get('Player')}) does not match session player ({player_id})")
+                raise ValueError(f"Player mismatch: payload ({payload_dict.get('Player')}) vs session ({player_id})")
+
+            errors = []
             try:
                 validated = MazesoundMessage(**payload_dict)
-                timestamp1 = msg["timestamp"].replace(tzinfo=pytz.utc)
                 send_time = validated.Hour.replace(tzinfo=pytz.utc)
-                process_time = datetime.now(pytz.utc)
-                latency = (process_time - send_time).total_seconds() * 1000
-                with latency_lock:
-                    last_latency = latency
             except ValidationError as e:
-                errors = e.errors()
-                modified = False
+                validation_errors = e.errors()
                 if any(error['loc'][0] == 'Player' for error in errors):
                     payload_dict['Player'] = player_id
-                    modified = True
-                if any(error['loc'][0] == 'Hour' for error in errors):
-                    modified = True  # Note: Original code has commented logic; assuming intent to use current time
-                if modified:
-                    validated = MazesoundMessage(**payload_dict)
-                    send_time = datetime.fromisoformat(payload_dict['Hour']).replace(tzinfo=pytz.utc)
-                    process_time = datetime.now(pytz.utc)
-                    latency = (process_time - send_time).total_seconds() * 1000
-                    with latency_lock:
-                        last_latency = latency
-                else:
-                    raise
+                if any(error['loc'][0] == 'Sound' for error in errors):
+                    payload_dict['Sound'] = - sound
+                if any(error['loc'][0] == 'Hour' for error in validation_errors):
+                    if last_valid_timestamp is None:
+                        estimated_timestamp = datetime.now(pytz.utc).timestamp()
+                        errors.append("Hour set to current time (datetime.now()) as first message was invalid")
+                    else:
+                        estimated_timestamp = last_valid_timestamp + typical_interval
+                        errors.append("Hour estimated by adding typical interval to last valid timestamp")
+                    payload_dict['Hour'] = datetime.fromtimestamp(estimated_timestamp, pytz.utc).isoformat()
+                validated = MazesoundMessage(**payload_dict)
+                send_time = validated.Hour.replace(tzinfo=pytz.utc)
+
+            timestamp1 = msg["timestamp"].replace(tzinfo=pytz.utc)
+            process_time = datetime.now(pytz.utc)
+            latency = (process_time - send_time).total_seconds() * 1000
             doc = {
                 "session_id": SESSION_ID,
                 "player": validated.Player,
@@ -351,15 +340,19 @@ def worker_mazesound():
                 "hour": validated.Hour,
                 "message_hash": message_hash,
                 "processed": False,
-                "latency_ms": latency
+                "latency_ms": latency,
             }
+
             with mongo_client.start_session() as session:
                 with session.start_transaction():
                     sound_messages_col.insert_one(doc)
                     raw_messages_col.update_one({"_id": msg["_id"]}, {"$set": {"processed": True}})
-            logger.info(f"CURRENT PROCESSING TIME: {(datetime.now(pytz.utc) - timestamp1).total_seconds()* 1000} ms ")
+
+            last_valid_timestamp = send_time.timestamp()
+            logging.info(f"Processing time: {(process_time - timestamp1).total_seconds() * 1000} ms")
+
         except Exception as e:
-            logger.error(f"Error in worker_mazesound: {e}")
+            logging.error(f"Error in worker_mazesound: {e}")
             failed_messages_col.insert_one({
                 "session_id": SESSION_ID,
                 "topic": topic,
