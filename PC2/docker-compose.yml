@@ -2,8 +2,6 @@ services:
   mysql:
     image: mysql:8
     container_name: mysql
-    networks:
-      - db-network
     ports:
       - "3306:3306"
     environment:
