@@ -1,102 +1,83 @@
-# IMPORTANT: Before running, ensure the mongo-keyfile exists in the current directory
-# with correct permissions. Run these commands to create it if needed:
-#   openssl rand -base64 756 > mongo-keyfile
-#   sudo chown 999:999 mongo-keyfile
-#   sudo chmod 600 mongo-keyfile
-
 services:
   mongo1:
     image: mongo:latest
-    hostname: mongo1
+    container_name: mongo1
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_ROOT_PASSWORD=adminpass
-    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: adminpass
+    command:
+      [
+        "mongod",
+        "--replSet",
+        "my-mongo-set",
+        "--auth",
+        "--keyFile",
+        "/etc/mongo-keyfile",
+      ]
     volumes:
-      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+      - ./mongo-keyfile:/etc/mongo-keyfile
       - mongo1_data:/data/db
     ports:
       - "30001:27017"
     networks:
       - db-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'my-mongo-set',members:[{_id:0,host:'mongo1:27017'},{_id:1,host:'mongo2:27017'},{_id:2,host:'mongo3:27017'}]}) }" | mongosh --port 27017 --username admin --password adminpass --authenticationDatabase admin --quiet
+      interval: 5s
+      timeout: 30s
+      retries: 30
 
   mongo2:
     image: mongo:latest
-    hostname: mongo2
+    container_name: mongo2
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_ROOT_PASSWORD=adminpass
-    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: adminpass
+    command:
+      [
+        "mongod",
+        "--replSet",
+        "my-mongo-set",
+        "--auth",
+        "--keyFile",
+        "/etc/mongo-keyfile",
+      ]
     volumes:
-      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+      - ./mongo-keyfile:/etc/mongo-keyfile
       - mongo2_data:/data/db
     ports:
       - "30002:27017"
     networks:
       - db-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
   mongo3:
     image: mongo:latest
-    hostname: mongo3
+    container_name: mongo3
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_ROOT_PASSWORD=adminpass
-    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: adminpass
+    command:
+      [
+        "mongod",
+        "--replSet",
+        "my-mongo-set",
+        "--auth",
+        "--keyFile",
+        "/etc/mongo-keyfile",
+      ]
     volumes:
-      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+      - ./mongo-keyfile:/etc/mongo-keyfile
       - mongo3_data:/data/db
     ports:
       - "30003:27017"
     networks:
       - db-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  mongoinit:
-    image: mongo:latest
-    command:
-      - bash
-      - -c
-      - |
-        echo "Waiting for all MongoDB nodes to be ready..."
-        for host in mongo1:27017 mongo2:27017 mongo3:27017; do
-          while ! mongosh --host $host -u admin -p adminpass --authenticationDatabase admin --eval 'db.runCommand({ ping: 1 })' > /dev/null 2>&1; do
-            sleep 1
-          done
-        done
-        echo "All nodes are ready. Initiating replica set..."
-        mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'rs.initiate({
-          _id: "my-mongo-set",
-          members: [
-            { _id: 0, host: "mongo1:27017" },
-            { _id: 1, host: "mongo2:27017" },
-            { _id: 2, host: "mongo3:27017" }
-          ]
-        })'
-        echo "Waiting for primary to be elected..."
-        while true; do
-          status=$(mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'rs.status().members' --quiet)
-          if echo "$status" | grep -q '"stateStr":"PRIMARY"'; then
-            echo "Primary elected."
-            break
-          fi
-          sleep 1
-        done
-    networks:
-      - db-network
-    depends_on:
-      - mongo1
-      - mongo2
-      - mongo3
 
   mqtt_to_mongodb:
     build: ./mqtt_to_mongo
     depends_on:
-      - mongoinit
+      mongo1:
+        condition: service_healthy
     networks:
       - db-network
     environment:
