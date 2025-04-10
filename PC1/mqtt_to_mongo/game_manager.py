@@ -65,41 +65,54 @@ def connect_to_mongodb(retry_count=5, retry_delay=5):
     raise SystemExit(1)
 
 def log_subprocess_output(proc, out_queue, err_queue, player_id, proc_name):
-    """Purpose: Reads and logs subprocess stdout and stderr in real-time for monitoring and debugging.
-    Execution Flow:
-    1. Define a nested function read_output to continuously read lines from a pipe (stdout or stderr).
-    2. In read_output, iterate over pipe lines, queue each line with a logging level and prefix, and close the pipe when done.
-    3. Create two daemon threads: one for stdout and one for stderr, passing the respective pipes, queues, and prefixes.
-    4. Start both threads to begin reading output concurrently.
-    5. Enter an infinite loop to process queued messages from out_queue and err_queue.
-    6. For each queue, attempt to get a message within a 1-second timeout.
-    7. If a message is retrieved, log it at the specified level (INFO) and print it to stdout for Docker logs.
-    8. Mark the task as done in the queue.
-    9. If the queue is empty (timeout), check if the process has terminated (proc.poll() is not None); if so, exit the loop."""
+    """Reads and logs subprocess stdout and stderr in real-time for monitoring and debugging."""
     def read_output(pipe, q, level, prefix):
         for line in iter(pipe.readline, ''):
             q.put((level, f"{prefix}: {line.strip()}"))
         pipe.close()
-    out_thread = threading.Thread(target=read_output, args=(proc.stdout, out_queue, logging.INFO, f"{player_id}/{proc_name}/stdout"), daemon=True)
-    err_thread = threading.Thread(target=read_output, args=(proc.stderr, err_queue, logging.INFO, f"{player_id}/{proc_name}/stderr"), daemon=True)
+
+    # Start threads to read stdout and stderr concurrently
+    out_thread = threading.Thread(
+        target=read_output,
+        args=(proc.stdout, out_queue, logging.INFO, f"{player_id}/{proc_name}/stdout"),
+        daemon=True
+    )
+    err_thread = threading.Thread(
+        target=read_output,
+        args=(proc.stderr, err_queue, logging.INFO, f"{player_id}/{proc_name}/stderr"),
+        daemon=True
+    )
     out_thread.start()
     err_thread.start()
+
+    # Process queues efficiently
     while True:
-        try:
-            level, message = out_queue.get(timeout=1)
-            logger.log(level, message)
-            print(message)
-            out_queue.task_done()
-        except queue.Empty:
-            pass
-        try:
-            level, message = err_queue.get(timeout=1)
-            logger.log(level, message)
-            print(message)
-            err_queue.task_done()
-        except queue.Empty:
-            if proc.poll() is not None:
+        # Process all available messages from out_queue
+        while True:
+            try:
+                level, message = out_queue.get_nowait()
+                logger.log(level, message)
+                print(message)
+                out_queue.task_done()
+            except queue.Empty:
                 break
+
+        # Process all available messages from err_queue
+        while True:
+            try:
+                level, message = err_queue.get_nowait()
+                logger.log(level, message)
+                print(message)
+                err_queue.task_done()
+            except queue.Empty:
+                break
+
+        # Check if the subprocess has terminated
+        if proc.poll() is not None:
+            break
+
+        # Brief sleep to avoid busy-waiting when queues are empty
+        time.sleep(0.1)
 
 def start_scripts(player_id, mqtt_config):
     """Purpose: Initiates a new game session for a player by starting subprocesses if no active session exists.
@@ -340,7 +353,7 @@ def connect_mqtt():
     client = mqtt_client.Client(client_id="game_manager")
     def on_connect(c, u, f, rc):
         logger.info(f"Connected with result code {rc}")
-        c.subscribe("pisid_maze/mazeManager/#", qos=1)
+        c.subscribe("pisid_maze/mazeManager/#", qos=2)
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect("test.mosquitto.org", 1883)

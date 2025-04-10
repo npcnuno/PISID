@@ -5,7 +5,7 @@ services:
     environment:
       - MONGO_INITDB_ROOT_USERNAME=admin
       - MONGO_INITDB_ROOT_PASSWORD=adminpass
-    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
+    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile --bind_ip_all
     volumes:
       - ./mongo-keyfile:/etc/mongo-keyfile:ro
       - mongo1_data:/data/db
@@ -13,8 +13,11 @@ services:
       - "30001:27017"
     networks:
       - db-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet mongodb://admin:adminpass@localhost:27017/admin
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   mongo2:
     image: mongo:latest
@@ -22,7 +25,7 @@ services:
     environment:
       - MONGO_INITDB_ROOT_USERNAME=admin
       - MONGO_INITDB_ROOT_PASSWORD=adminpass
-    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
+    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile --bind_ip_all
     volumes:
       - ./mongo-keyfile:/etc/mongo-keyfile:ro
       - mongo2_data:/data/db
@@ -30,8 +33,11 @@ services:
       - "30002:27017"
     networks:
       - db-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet mongodb://admin:adminpass@localhost:27017/admin
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   mongo3:
     image: mongo:latest
@@ -39,7 +45,7 @@ services:
     environment:
       - MONGO_INITDB_ROOT_USERNAME=admin
       - MONGO_INITDB_ROOT_PASSWORD=adminpass
-    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile
+    command: mongod --replSet my-mongo-set --auth --keyFile /etc/mongo-keyfile --bind_ip_all
     volumes:
       - ./mongo-keyfile:/etc/mongo-keyfile:ro
       - mongo3_data:/data/db
@@ -47,59 +53,58 @@ services:
       - "30003:27017"
     networks:
       - db-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet mongodb://admin:adminpass@localhost:27017/admin
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   mongoinit:
     image: mongo:latest
     depends_on:
-      - mongo1
-      - mongo2
-      - mongo3
+      mongo1:
+        condition: service_healthy
+      mongo2:
+        condition: service_healthy
+      mongo3:
+        condition: service_healthy
     command: >
-      bash -c " echo 'Waiting for MongoDB instances...'
-      until mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
-        mongosh --host mongo2:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
-        mongosh --host mongo3:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")'; do
-      echo 'Waiting...'
-      sleep 5
-      done
-      echo 'Checking and initiating replica set if necessary...'
-        mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval '
-      var isMaster = db.isMaster();
-      if (isMaster.setName) {
-      print(\"Replica set is already initiated with name: \" + isMaster.setName);
-      } else {
-      print(\"Initiating replica set...\");
-      rs.initiate({
-        _id: \"my-mongo-set\",
-        members: [
-          {_id: 0, host: \"mongo1:27017\", priority: 3},
-          {_id: 1, host: \"mongo2:27017\", priority: 2},
-          {_id: 2, host: \"mongo3:27017\", priority: 1}
-        ]
-      });
-      var timeout = 60; // seconds
-      var start = new Date();
-      while (true) {
-        try {
-          var status = rs.status();
-          if (status.ok === 1) {
-            print(\"Replica set initialized!\");
-            break;
+      bash -c "
+        echo 'Waiting for MongoDB instances to be healthy...'
+        sleep 10
+        echo 'Initiating replica set...'
+        mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin <<EOF
+          rs.initiate({
+            _id: 'my-mongo-set',
+            members: [
+              {_id: 0, host: 'mongo1:27017', priority: 3},
+              {_id: 1, host: 'mongo2:27017', priority: 2},
+              {_id: 2, host: 'mongo3:27017', priority: 1}
+            ]
+          });
+          var timeout = 60;
+          var start = new Date();
+          while (true) {
+            try {
+              var status = rs.status();
+              if (status.ok === 1) {
+                print('Replica set initialized successfully!');
+                break;
+              }
+            } catch (e) {
+              // Ignore errors during initiation
+            }
+            if ((new Date() - start) / 1000 > timeout) {
+              print('Timeout waiting for replica set initiation.');
+              exit(1);
+            }
+            sleep(1000);
+            print('Waiting for replica set to stabilize...');
           }
-        } catch (e) {
-          // Ignore errors during initiation
-        }
-        if ((new Date() - start) / 1000 > timeout) {
-          print(\"Timeout waiting for replica set initiation.\");
-          break;
-        }
-        sleep(1000);
-        print(\"Waiting for replica set...\");
-      }
-      }
-      '
+          print('Forcing configuration update...');
+          rs.reconfig(rs.conf(), {force: true});
+           EOF
+        echo 'Replica set setup complete!'
       "
     networks:
       - db-network
