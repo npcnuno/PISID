@@ -1,3 +1,9 @@
+# IMPORTANT: Before running, ensure the mongo-keyfile exists in the current directory
+# with correct permissions. Run these commands to create it if needed:
+#   openssl rand -base64 756 > mongo-keyfile
+#   sudo chown 999:999 mongo-keyfile
+#   sudo chmod 600 mongo-keyfile
+
 services:
   mongo1:
     image: mongo:latest
@@ -56,7 +62,7 @@ services:
       - bash
       - -c
       - |
-        echo "Waiting for all mongo nodes to be ready..."
+        echo "Waiting for all MongoDB nodes to be ready..."
         for host in mongo1:27017 mongo2:27017 mongo3:27017; do
           while ! mongosh --host $host -u admin -p adminpass --authenticationDatabase admin --eval 'db.runCommand({ ping: 1 })' > /dev/null 2>&1; do
             sleep 1
@@ -71,6 +77,15 @@ services:
             { _id: 2, host: "mongo3:27017" }
           ]
         })'
+        echo "Waiting for primary to be elected..."
+        while true; do
+          status=$(mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'rs.status().members' --quiet)
+          if echo "$status" | grep -q '"stateStr":"PRIMARY"'; then
+            echo "Primary elected."
+            break
+          fi
+          sleep 1
+        done
     networks:
       - db-network
     depends_on:
