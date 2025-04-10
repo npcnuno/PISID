@@ -57,56 +57,36 @@ services:
       - mongo2
       - mongo3
     command: >
-      bash -c " echo 'Waiting for MongoDB instances...'
-      until mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
-        mongosh --host mongo2:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
-        mongosh --host mongo3:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")'; do
-      echo 'Waiting...'
-      sleep 5
+      bash -c "
+      until mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' ; do
+        echo 'Waiting for mongo1...'
+        sleep 1
       done
-      echo 'Checking and initiating replica set if necessary...'
-        mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval '
-      var isMaster = db.isMaster();
-      if (isMaster.setName) {
-      print(\"Replica set is already initiated with name: \" + isMaster.setName);
-      } else {
-      print(\"Initiating replica set...\");
-      rs.initiate({
-        _id: \"my-mongo-set\",
-        members: [
-          {_id: 0, host: \"mongo1:27017\", priority: 3},
-          {_id: 1, host: \"mongo2:27017\", priority: 2},
-          {_id: 2, host: \"mongo3:27017\", priority: 1}
-        ]
-      });
-      var timeout = 60; // seconds
-      var start = new Date();
-      var attempts = 0;
-      var maxAttempts = 60;
-      while (attempts < maxAttempts) {
-      try {
-      var status = rs.status();
-      if (status.ok === 1) {
-      print("Replica set initialized!");
-      break;
-      }
-      } catch (e) {
-      // Ignore errors
-      }
-      print("Waiting for replica set...");
-      attempts++;
-      if (attempts >= maxAttempts) {
-       print("Timeout waiting for replica set initiation.");
-        break;
-      }
-      // Busy wait for 1 second
-      var startTime = new Date().getTime();
-      while (new Date().getTime() - startTime < 1000) {
-          // Do nothing
-       }
+      echo 'Initiating replica set...'
+      mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval '
+        if (!db.isMaster().setName) {
+          rs.initiate({
+            _id: \"my-mongo-set\",
+            members: [
+              {_id: 0, host: \"mongo1:27017\", priority: 3},
+              {_id: 1, host: \"mongo2:27017\", priority: 2},
+              {_id: 2, host: \"mongo3:27017\", priority: 1}
+            ]
+          });
+          // Wait for initiation
+          var timeout = 60;
+          var start = new Date();
+          while (true) {
+            if (rs.status().ok) break;
+            if ((Date.now() - start) > timeout*1000) {
+              throw new Error(\"Timeout initiating replica set\");
+            }
+            sleep(1000);
+          }
+        } else {
+          print(\"Replica set already initialized.\");
         }
-      '
-      "
+      '"
     networks:
       - db-network
 
