@@ -57,30 +57,49 @@ services:
       - mongo2
       - mongo3
     command: >
-      bash -c "
-        echo 'Waiting for MongoDB instances...'
-        until mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
-              mongosh --host mongo2:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
-              mongosh --host mongo3:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")'; do
-          echo 'Waiting...'
-          sleep 5
-        done
-        echo 'Initiating replica set...'
+      bash -c " echo 'Waiting for MongoDB instances...'
+      until mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
+        mongosh --host mongo2:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' && \
+        mongosh --host mongo3:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")'; do
+      echo 'Waiting...'
+      sleep 5
+      done
+      echo 'Checking and initiating replica set if necessary...'
         mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval '
-          rs.initiate({
-            _id: \"my-mongo-set\",
-            members: [
-              {_id: 0, host: \"mongo1:27017\", priority: 3},
-              {_id: 1, host: \"mongo2:27017\", priority: 2},
-              {_id: 2, host: \"mongo3:27017\", priority: 1}
-            ]
-          });
-          while (rs.status().ok !== 1) {
-            sleep(1000);
-            print(\"Waiting for replica set...\");
+      var isMaster = db.isMaster();
+      if (isMaster.setName) {
+      print(\"Replica set is already initiated with name: \" + isMaster.setName);
+      } else {
+      print(\"Initiating replica set...\");
+      rs.initiate({
+        _id: \"my-mongo-set\",
+        members: [
+          {_id: 0, host: \"mongo1:27017\", priority: 3},
+          {_id: 1, host: \"mongo2:27017\", priority: 2},
+          {_id: 2, host: \"mongo3:27017\", priority: 1}
+        ]
+      });
+      var timeout = 60; // seconds
+      var start = new Date();
+      while (true) {
+        try {
+          var status = rs.status();
+          if (status.ok === 1) {
+            print(\"Replica set initialized!\");
+            break;
           }
-          print(\"Replica set initialized!\");
-        '
+        } catch (e) {
+          // Ignore errors during initiation
+        }
+        if ((new Date() - start) / 1000 > timeout) {
+          print(\"Timeout waiting for replica set initiation.\");
+          break;
+        }
+        sleep(1000);
+        print(\"Waiting for replica set...\");
+      }
+      }
+      '
       "
     networks:
       - db-network
