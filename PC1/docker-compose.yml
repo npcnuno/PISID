@@ -52,43 +52,31 @@ services:
 
   mongoinit:
     image: mongo:latest
+    command:
+      - bash
+      - -c
+      - |
+        echo "Waiting for all mongo nodes to be ready..."
+        for host in mongo1:27017 mongo2:27017 mongo3:27017; do
+          while ! mongosh --host $host -u admin -p adminpass --authenticationDatabase admin --eval 'db.runCommand({ ping: 1 })' > /dev/null 2>&1; do
+            sleep 1
+          done
+        done
+        echo "All nodes are ready. Initiating replica set..."
+        mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'rs.initiate({
+          _id: "my-mongo-set",
+          members: [
+            { _id: 0, host: "mongo1:27017" },
+            { _id: 1, host: "mongo2:27017" },
+            { _id: 2, host: "mongo3:27017" }
+          ]
+        })'
+    networks:
+      - db-network
     depends_on:
       - mongo1
       - mongo2
       - mongo3
-    command: >
-      bash -c "
-      until mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")' ; do
-        echo 'Waiting for mongo1...'
-        sleep 1
-      done
-      echo 'Initiating replica set...'
-      mongosh --host mongo1:27017 -u admin -p adminpass --authenticationDatabase admin --eval '
-        if (!db.isMaster().setName) {
-          rs.initiate({
-            _id: \"my-mongo-set\",
-            members: [
-              {_id: 0, host: \"mongo1:27017\", priority: 3},
-              {_id: 1, host: \"mongo2:27017\", priority: 2},
-              {_id: 2, host: \"mongo3:27017\", priority: 1}
-            ]
-          });
-          // Wait for initiation
-          var timeout = 60;
-          var start = new Date();
-          while (true) {
-            if (rs.status().ok) break;
-            if ((Date.now() - start) > timeout*1000) {
-              throw new Error(\"Timeout initiating replica set\");
-            }
-            sleep(1000);
-          }
-        } else {
-          print(\"Replica set already initialized.\");
-        }
-      '"
-    networks:
-      - db-network
 
   mqtt_to_mongodb:
     build: ./mqtt_to_mongo
