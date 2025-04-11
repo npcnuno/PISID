@@ -29,11 +29,12 @@ MONGO_URI = os.getenv('MONGO_URI', (
 MQTT_BROKER = "test.mosquitto.org"
 MQTT_PORT = 1883
 PLAYER_ID = int(os.getenv('PLAYER_ID', '33'))
-MQTT_TOPICS = {
+MQTT_TOPICS = os.getenv("MQTT_TOPICS",{
     "move_messages": f"pisid_mazemov_{PLAYER_ID}_processed",
     "sound_messages": f"pisid_mazesound_{PLAYER_ID}_processed"
-}
-QOS = 2  # At-least-once delivery
+})
+
+QOS = int(os.getenv("QOS", 2))  # At-least-once delivery
 
 # Message Queues
 publish_queue = queue.Queue()  # For sending messages to MQTT
@@ -99,12 +100,10 @@ def worker_publish(mqtt_client_instance):
             topic = message_data["topic"]
             payload = message_data["payload"]
             
-            # Ensure 'hour' is a string if present (already should be from parse_payload)
             if "hour" in payload:
                 if isinstance(payload["hour"], datetime):
                     payload["hour"] = payload["hour"].isoformat()
             
-            # Publish with QoS 1
             result = mqtt_client_instance.publish(topic, json.dumps(payload), qos=QOS)
             if result.rc == mqtt_client.MQTT_ERR_SUCCESS:
                 logger.info(f"Published message {message_id} (MID {result.mid}) to {topic}")
@@ -179,8 +178,7 @@ def mark_messages_as_sent(mongo_client, mqtt_client):
                             if isinstance(message["Hour"], datetime):
                                 payload["Hour"] = message["Hour"].isoformat()
                             else:
-                                payload["Hour"] = str(message["Hour"])  # Already a string from parse_payload
-                        
+                                payload["Hour"] = str(message["Hour"])                         
                         # Queue the message for publishing
                         with queue_lock:
                             publish_queue.put({

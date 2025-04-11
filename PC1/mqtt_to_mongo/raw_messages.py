@@ -8,17 +8,18 @@ import logging
 import time
 import hashlib
 
+
 # Logging setup
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Configuration
-player_id = int(os.getenv('PLAYER_ID', '33'))
+PLAYER_ID = int(os.getenv('PLAYER_ID', '33'))
 MQTT_BROKER = os.getenv('MQTT_BROKER', 'broker.mqtt-dashboard.com')
 MQTT_PORT = int(os.getenv('MQTT_PORT', '1883'))
 TOPICS = [
-    os.getenv('MOVEMENT_TOPIC', f'pisid_mazemov_{player_id}'),
-    os.getenv('SOUND_TOPIC', f'pisid_mazesound_{player_id}')
+    os.getenv('MOVEMENT_TOPIC', f'pisid_mazemov_{PLAYER_ID}'),
+    os.getenv('SOUND_TOPIC', f'pisid_mazesound_{PLAYER_ID}')
 ]
 SESSION_ID = os.getenv('SESSION_ID')
 MONGO_USER = os.getenv('MONGO_USER', 'admin')
@@ -32,7 +33,7 @@ MONGO_URI = os.getenv('MONGO_URI', (
     f"connectTimeoutMS=5000&socketTimeoutMS=5000&serverSelectionTimeoutMS=5000&"
     f"readPreference=primaryPreferred"
 ))
-TIME_BETWEEN_MARSAMI_MOVEMENTS = 0.9
+TIME_BETWEEN_MARSAMI_MOVEMENTS = float(os.getenv("TIME_BETWEEN_MARSAMI_MOVEMENTS", 0.9))
 
 # Topic-specific queues and threads
 topic_queues = {topic: queue.Queue() for topic in TOPICS}
@@ -66,7 +67,7 @@ def connect_to_mongodb(retry_count=5, retry_delay=5):
 
 def connect_mqtt(topic: str) -> mqtt_client.Client:
     """Connect to MQTT broker and set up callbacks for a specific topic."""
-    client_id = f"player_{player_id}_{topic.split('_')[1]}_raw"
+    client_id = f"player_{PLAYER_ID}_{topic.split('_')[1]}_raw"
     client = mqtt_client.Client(client_id=client_id)
 
     def on_connect(c, u, f, rc):
@@ -207,5 +208,5 @@ def main():
         time.sleep(60)
 
 if __name__ == "__main__":
-    logger.info(f"Starting MQTT listeners for player {player_id} on topics: {TOPICS}")
+    logger.info(f"Starting MQTT listeners for player {PLAYER_ID} on topics: {TOPICS}")
     main()
