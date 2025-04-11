@@ -1,6 +1,5 @@
 paho-mqtt==2.1.0 
 pymongo==4.10.1 
-cachetools==5.5.2 
 pydantic==2.10.6
 pytz==2025.1
 typing==3.7.4.3

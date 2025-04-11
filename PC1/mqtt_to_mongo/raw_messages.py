@@ -3,12 +3,12 @@ import threading
 import queue
 from datetime import datetime
 from paho.mqtt import client as mqtt_client
-from pymongo import MongoClient, errors 
+from pymongo import MongoClient, errors
 import logging
 import time
 import hashlib
 
-# Logging setup (set to DEBUG to capture debug logs)
+# Logging setup
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ MONGO_URI = os.getenv('MONGO_URI', (
     f"connectTimeoutMS=5000&socketTimeoutMS=5000&serverSelectionTimeoutMS=5000&"
     f"readPreference=primaryPreferred"
 ))
+TIME_BETWEEN_MARSAMI_MOVEMENTS = 0.9
 
 # Topic-specific queues and threads
 topic_queues = {topic: queue.Queue() for topic in TOPICS}
@@ -55,7 +56,7 @@ def connect_to_mongodb(retry_count=5, retry_delay=5):
             db = mongo_client[MONGO_DB]
             raw_messages_col = db["raw_messages"]
             failed_messages_col = db["failed_messages"]
-            return True
+            return
         except errors.PyMongoError as e:
             logger.error(f"Connection failed (attempt {attempt+1}/{retry_count}): {e}")
             if attempt < retry_count - 1:
@@ -67,15 +68,15 @@ def connect_mqtt(topic: str) -> mqtt_client.Client:
     """Connect to MQTT broker and set up callbacks for a specific topic."""
     client_id = f"player_{player_id}_{topic.split('_')[1]}_raw"
     client = mqtt_client.Client(client_id=client_id)
-    
+
     def on_connect(c, u, f, rc):
         logger.info(f"Client for topic {topic} connected with result code {rc}")
         c.subscribe(topic, qos=1)
-    
+
     def on_message(c, u, msg):
         logger.debug(f"Received message on topic {topic}: QoS={msg.qos}, MID={msg.mid}")
         topic_queues[topic].put(msg)
-    
+
     client.on_connect = on_connect
     client.on_message = on_message
     try:
@@ -86,58 +87,46 @@ def connect_mqtt(topic: str) -> mqtt_client.Client:
         raise
     return client
 
-def worker(topic: str, seen_ids: set, hash_map: dict):
+def worker(topic: str, message_map: dict, hash_map: dict):
     """Process messages from the queue with duplicate checks."""
+    cleanup_counter = 0
     while True:
         msg = topic_queues[topic].get()
         if msg is None:
             break
         try:
-            # Compute hash of the payload (using raw bytes)
+            payload_str = msg.payload.decode().strip()
             hash_value = hashlib.md5(msg.payload).hexdigest()
             current_time = time.time()
-            
-            # Check for duplicate based on content (100ms TTL)
-            is_content_duplicate = False
-            if hash_value in hash_map:
-                last_seen = hash_map[hash_value]
-                time_diff = current_time - last_seen
-                logger.debug(f"Hash {hash_value} found in hash_map for topic {topic}, time since last seen: {time_diff:.4f}s")
-                if time_diff < 0.1:
-                    is_content_duplicate = True
-                    logger.debug(f"Content duplicate detected for topic {topic}, hash {hash_value}")
-            # Update the hash_map with current timestamp
-            hash_map[hash_value] = current_time
-            
-            # Check for duplicate based on message ID if QoS == 1
-            is_mid_duplicate = False
+            is_duplicate = False
+
             if msg.qos == 1:
-                logger.debug(f"Checking QoS 1 message ID {msg.mid} for topic {topic}")
-                if msg.mid in seen_ids:
-                    is_mid_duplicate = True
-                    logger.debug(f"Message ID duplicate detected for topic {topic}, MID {msg.mid}")
+                if msg.mid in message_map:
+                    is_duplicate = True
+                    logger.debug(f"Duplicate QoS 1 message ID {msg.mid} for topic {topic}")
                 else:
-                    seen_ids.add(msg.mid)
-                    logger.debug(f"Added new message ID {msg.mid} to seen_ids for topic {topic}")
-            
-            # Decode payload for storage (assuming UTF-8 text)
-            payload_str = msg.payload.decode().strip()
-            
-            if is_content_duplicate or is_mid_duplicate:
-                reason = "Duplicate content" if is_content_duplicate else "Duplicate message ID"
+                    message_map[msg.mid] = hash_value
+                    logger.debug(f"Added message ID {msg.mid} with hash {hash_value} for topic {topic}")
+                #FIXME: If there is a need to check for duplicates from the sensor uncomment it 
+            else:
+                if hash_value in hash_map and (current_time - hash_map[hash_value]) < TIME_BETWEEN_MARSAMI_MOVEMENTS:
+                    is_duplicate = True
+                    logger.debug(f"Duplicate QoS 0 content hash {hash_value} for topic {topic}")
+                hash_map[hash_value] = current_time
+
+            if is_duplicate:
                 failed_messages_col.insert_one({
                     "topic": msg.topic,
                     "session_id": SESSION_ID,
                     "payload": payload_str,
-                    "reason": reason,
+                    "reason": "Duplicate message",
                     "timestamp": datetime.now(),
                     "processed": True,
                     "message_id": msg.mid if msg.qos > 0 else None,
                     "QOS": msg.qos if msg.qos > 0 else None
                 })
-                logger.info(f"Duplicate message from {topic}: {reason}, QoS={msg.qos}, MID={msg.mid}")
+                logger.info(f"Duplicate message from {topic}: QoS={msg.qos}, MID={msg.mid}")
             else:
-                # Insert into raw_messages_col
                 document = {
                     "topic": msg.topic,
                     "session_id": SESSION_ID,
@@ -148,16 +137,33 @@ def worker(topic: str, seen_ids: set, hash_map: dict):
                 if msg.qos > 0:
                     document["message_id"] = msg.mid
                     document["QOS"] = msg.qos
-                raw_messages_col.insert_one(document)
-                logger.info(f"Inserted message from {topic}: QoS={msg.qos}, MID={msg.mid}")
-                logger.debug(f"Message inserted into raw_messages_col for topic {topic}, hash {hash_value}")
-        
+                for attempt in range(3):
+                    try:
+                        raw_messages_col.insert_one(document)
+                        logger.info(f"Inserted message from {topic}: QoS={msg.qos}, MID={msg.mid}")
+                        break
+                    except errors.PyMongoError as e:
+                        if attempt < 2:
+                            logger.warning(f"Retry {attempt+1}/3 for insert: {e}")
+                            time.sleep(1)
+                        else:
+                            raise
+
+            # Periodic cleanup of hash_map for QoS 0 messages
+            cleanup_counter += 1
+            if cleanup_counter >= 100:
+                cleanup_counter = 0
+                to_remove = [k for k, v in hash_map.items() if current_time - v > 1]
+                for k in to_remove:
+                    del hash_map[k]
+                logger.debug(f"Cleaned up {len(to_remove)} old entries from hash_map for topic {topic}")
+
         except Exception as e:
             logger.error(f"Error processing message from {topic}: {e}")
             failed_messages_col.insert_one({
                 "topic": msg.topic,
                 "session_id": SESSION_ID,
-                "payload": msg.payload.decode().strip(),
+                "payload": payload_str,
                 "error": str(e),
                 "timestamp": datetime.now(),
                 "processed": True,
@@ -177,18 +183,15 @@ def start_client_loop(client: mqtt_client.Client, topic: str):
 def main():
     """Main function to set up connections and start threads."""
     connect_to_mongodb()
-    
-    # Initialize data structures for duplicate checks
-    seen_message_ids = {topic: set() for topic in TOPICS}
-    message_hashes = {topic: {} for topic in TOPICS}
-    
-    # Start MQTT clients and worker threads for each topic
+    message_maps = {topic: {} for topic in TOPICS}  # message_id : hash_value | for QoS 1 in case of duplicates from the MQTT
+    hash_maps = {topic: {} for topic in TOPICS}    # hash_value : timestamp  | for QoS 0/2 in case of duplicates from the sensor
+
     for topic in TOPICS:
         client = connect_mqtt(topic)
         topic_clients[topic] = client
         worker_thread = threading.Thread(
             target=worker,
-            args=(topic, seen_message_ids[topic], message_hashes[topic]),
+            args=(topic, message_maps[topic], hash_maps[topic]),
             daemon=True
         )
         worker_thread.start()
@@ -199,8 +202,7 @@ def main():
             daemon=True
         )
         client_thread.start()
-    
-    # Keep the main thread running
+
     while True:
         time.sleep(60)
 

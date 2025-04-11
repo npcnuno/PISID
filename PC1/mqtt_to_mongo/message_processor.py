@@ -9,7 +9,6 @@ import hashlib
 import pytz
 import logging
 import re
-from typing import Optional
 import signal
 import sys
 
@@ -53,11 +52,11 @@ mazemov_worker_threads = []
 mazesound_worker_threads = []
 lock = threading.Lock()
 latency_lock = threading.Lock()
-last_latency: Optional[float] = None
+last_latency = None
 mazemov_threads = []
 mazesound_threads = []
-last_valid_timestamp = None  # Tracks the last valid or estimated timestamp (as a float)
-typical_interval = 5  # Seconds, adjust based on expected message frequency
+last_valid_timestamp = None  # Tracks the last valid or estimated timestamp 
+typical_interval = 0.05  # Seconds, adjust based on expected message frequency
 # Pydantic Models
 class MazemovMessage(BaseModel):
     Player: conint(ge=1)
@@ -155,22 +154,6 @@ def parse_payload(payload: str) -> dict:
             parsed_dict['Hour'] = datetime.strptime(hour_str, "%Y-%m-%d %H:%M:%S").isoformat()
     return parsed_dict
 
-def get_player_id_from_topic(topic: str) -> int:
-    """Purpose: Extracts the player ID from an MQTT topic string.
-    Execution Flow:
-    1. Split the topic by '_' (e.g., 'pisid_mazemov_33').
-    2. Check if there are at least 3 parts, first is 'pisid', and second is 'mazemov' or 'mazesound'.
-    3. Try to convert the third part to an integer (player_id).
-    4. On success, return the player_id.
-    5. On failure or invalid format, return default 33."""
-    parts = topic.split('_')
-    if len(parts) >= 3 and parts[0] == 'pisid' and parts[1] in ['mazemov', 'mazesound']:
-        try:
-            return int(parts[2])
-        except ValueError:
-            pass
-    return 33
-
 def stream_mazemov():
     """Purpose: Streams new mazemov messages from raw_messages using MongoDB change streams.
     Execution Flow:
@@ -253,14 +236,47 @@ def worker_mazemov():
         try:
             payload = msg["payload"]
             topic = msg["topic"]
-            player_id = get_player_id_from_topic(topic)
-            if player_id is None:
-                raise ValueError("Invalid topic, cannot extract player_id")
             message_hash = hashlib.sha256(payload.encode()).hexdigest()
-            payload_dict = parse_payload(payload)
-            if payload_dict.get("Player") != player_id:
-                raise ValueError(f"Player in payload ({payload_dict.get('Player')}) does not match session player ({player_id})")
-            validated = MazemovMessage(**payload_dict)
+            payload_dict = parse_payload(payload)  # Assume this function exists
+            errors = []
+
+            # Correct Player if mismatched
+            if payload_dict.get("Player") != PLAYER_ID:
+                payload_dict["Player"] = PLAYER_ID
+            try:
+                validated = MazemovMessage(**payload_dict)  # Assume MazemovMessage is a Pydantic model
+            except ValidationError as e:
+                validation_errors = e.errors()
+                for error in validation_errors:
+                    field = error['loc'][0]
+                    if field == 'Marsami':
+                        if payload_dict['Marsami'] < 0:
+                            payload_dict['Marsami'] = - payload_dict['Marsami']
+                        if not isinstance(payload_dict['Marsami'], int):
+                            payload_dict['Marsami'] = int(payload_dict['Marsami']) 
+                        errors.append("Tried to recover Marsami number")
+                    elif field == 'RoomOrigin':
+                        if payload_dict['RoomOrigin'] < 0:
+                            payload_dict['RoomOrigin'] = - payload_dict['RoomOrigin']
+                        if not isinstance(payload_dict['RoomOrigin'], int):
+                            payload_dict['RoomOrigin'] = int(payload_dict['RoomOrigin'])                       
+                        errors.append("Tried to recover RoomOrigin number")
+                    elif field == 'RoomDestiny':
+                        if payload_dict['RoomOrigin'] < 0:
+                            payload_dict['RoomDestiny'] = - payload_dict['RoomDestiny']
+                        if not isinstance(payload_dict['RoomDestiny'], int):
+                            payload_dict['RoomDestiny'] = int(payload_dict['RoomDestiny'])                       
+                        errors.append("Tried to recover RoomDestiny number")
+                    elif field == 'Status':
+                        if payload_dict['Status'] < 0:
+                            payload_dict['Status'] = - payload_dict['Status']
+                        if not isinstance(payload_dict['Status'], int):
+                            payload_dict['Status'] = int(payload_dict['Status'])                       
+                        errors.append("Tried to recover Status number")
+                # Re-validate after corrections
+                validated = MazemovMessage(**payload_dict)
+
+            # Create document with processed data
             doc = {
                 "session_id": SESSION_ID,
                 "player": validated.Player,
@@ -270,22 +286,27 @@ def worker_mazemov():
                 "status": validated.Status,
                 "timestamp": datetime.now(),
                 "message_hash": message_hash,
-                "processed": False
+                "processed": False,
+                "corrections": errors if errors else None  # Log corrections
             }
+
             with mongo_client.start_session() as session:
                 with session.start_transaction():
                     move_messages_col.insert_one(doc, session=session)
                     raw_messages_col.update_one({"_id": msg["_id"]}, {"$set": {"processed": True}}, session=session)
+
         except Exception as e:
             logger.error(f"Error in worker_mazemov: {e}")
-            failed_messages_col.insert_one({
-                "session_id": SESSION_ID,
-                "topic": topic,
-                "payload": payload,
-                "error": str(e),
-                "timestamp": datetime.now(),
-                "processed": True
-            })
+            with mongo_client.start_session() as session:
+                with session.start_transaction():    
+                    failed_messages_col.insert_one({
+                        "session_id": SESSION_ID,
+                        "topic": topic,
+                        "payload": payload,
+                        "error": str(e),
+                        "timestamp": datetime.now(),
+                        "processed": True
+                    })
         finally:
             mazemov_queue.task_done()
 
@@ -300,14 +321,10 @@ def worker_mazesound():
         try:
             payload = msg["payload"]
             topic = msg["topic"]
-            player_id = get_player_id_from_topic(topic)
-            if player_id is None:
-                raise ValueError("Invalid topic, cannot extract player_id")
             message_hash = hashlib.sha256(payload.encode()).hexdigest()
             payload_dict = parse_payload(payload)
-            sound = payload_dict.get("Sound")
-            if payload_dict.get("Player") != player_id:
-                raise ValueError(f"Player mismatch: payload ({payload_dict.get('Player')}) vs session ({player_id})")
+            if payload_dict.get("Player") != PLAYER_ID:
+                raise ValueError(f"Player mismatch: payload ({payload_dict.get('Player')}) vs session ({PLAYER_ID})")
 
             errors = []
             try:
@@ -316,9 +333,9 @@ def worker_mazesound():
             except ValidationError as e:
                 validation_errors = e.errors()
                 if any(error['loc'][0] == 'Player' for error in errors):
-                    payload_dict['Player'] = player_id
+                    payload_dict['Player'] = PLAYER_ID
                 if any(error['loc'][0] == 'Sound' for error in errors):
-                    payload_dict['Sound'] = - sound
+                    payload_dict['Sound'] = -  payload_dict['Sound']
                 if any(error['loc'][0] == 'Hour' for error in validation_errors):
                     if last_valid_timestamp is None:
                         estimated_timestamp = datetime.now(pytz.utc).timestamp()
@@ -353,14 +370,16 @@ def worker_mazesound():
 
         except Exception as e:
             logging.error(f"Error in worker_mazesound: {e}")
-            failed_messages_col.insert_one({
-                "session_id": SESSION_ID,
-                "topic": topic,
-                "payload": payload,
-                "error": str(e),
-                "timestamp": datetime.now().isoformat(),
-                "processed": True
-            })
+            with mongo_client.start_session() as session:
+                with session.start_transaction():
+                    failed_messages_col.insert_one({
+                        "session_id": SESSION_ID,
+                        "topic": topic,
+                        "payload": payload,
+                        "error": str(e),
+                        "timestamp": datetime.now().isoformat(),
+                        "processed": True
+                    })
         finally:
             mazesound_queue.task_done()
 
@@ -394,7 +413,7 @@ def process_mazemov_forever():
             time.sleep(5)
         except Exception as e:
             logger.error(f"Mazemov unexpected error: {e}")
-            time.sleep(5)
+            time.sleep(1)
 
 def process_mazesound_forever():
     """Purpose: Continuously streams mazesound messages using a specific pipeline and enqueues them.

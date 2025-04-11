@@ -23,10 +23,9 @@ MONGO_URI = os.getenv('MONGO_URI', (
     f"readPreference=primaryPreferred"
 ))
 
-
-CHECK_INTERVAL = 2  # Seconds to check process status
-BATCH_SIZE = 1000  # Number of documents to process per batch
-POLL_INTERVAL = 2  # Seconds between batch checks (low priority)
+CHECK_INTERVAL = os.getenv("CHECK_INTERVAL", 2)  # Seconds to check process status
+BATCH_SIZE = os.getenv("BATCH_SIZE", 1000)  # Number of documents to process per batch
+POLL_INTERVAL = os.getenv("POLL_INTERVAL", 2)  # Seconds between batch checks (low priority)
 
 mongo_client = None
 db = None
