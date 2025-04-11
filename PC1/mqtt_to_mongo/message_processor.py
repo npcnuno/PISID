@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 SESSION_ID = os.getenv('SESSION_ID')
-PLAYER_ID = os.getenv('PLAYER_ID')
+PLAYER_ID = int(os.getenv('PLAYER_ID',33))
 MONGO_URI = os.getenv('MONGO_URI')
 INITIAL_STREAM_THREADS = 1
 INITIAL_WORKER_THREADS = 1
@@ -379,7 +379,7 @@ def worker_mazesound():
                         "error": str(e),
                         "timestamp": datetime.now().isoformat(),
                         "processed": True
-                    })
+            })
         finally:
             mazesound_queue.task_done()
 

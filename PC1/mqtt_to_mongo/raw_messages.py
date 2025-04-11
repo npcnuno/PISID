@@ -8,7 +8,6 @@ import logging
 import time
 import hashlib
 
-
 # Logging setup
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -101,14 +100,15 @@ def worker(topic: str, message_map: dict, hash_map: dict):
             current_time = time.time()
             is_duplicate = False
 
-            if msg.qos == 1:
-                if msg.mid in message_map:
-                    is_duplicate = True
-                    logger.debug(f"Duplicate QoS 1 message ID {msg.mid} for topic {topic}")
-                else:
-                    message_map[msg.mid] = hash_value
-                    logger.debug(f"Added message ID {msg.mid} with hash {hash_value} for topic {topic}")
-                #FIXME: If there is a need to check for duplicates from the sensor uncomment it 
+            if msg.qos > 0:
+                # if msg.mid in message_map:
+                #     is_duplicate = True
+                #     logger.debug(f"Duplicate QoS 1 message ID {msg.mid} for topic {topic}")
+                # else:
+                #     message_map[msg.mid] = hash_value
+                logger.debug(f"Added message ID {msg.mid} with hash {hash_value} for topic {topic}")
+            # elif msg.qos == 2:
+            #         logger.debug("Received message with qos 2") 
             else:
                 if hash_value in hash_map and (current_time - hash_map[hash_value]) < TIME_BETWEEN_MARSAMI_MOVEMENTS:
                     is_duplicate = True
