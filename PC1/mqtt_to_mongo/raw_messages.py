@@ -34,14 +34,13 @@ MONGO_URI = os.getenv('MONGO_URI', (
 ))
 TIME_BETWEEN_MARSAMI_MOVEMENTS = float(os.getenv("TIME_BETWEEN_MARSAMI_MOVEMENTS", 0.9))
 
-# Topic-specific queues and threads
+# Topic-specific queues
 topic_queues = {topic: queue.Queue() for topic in TOPICS}
-topic_clients = {}
-topic_threads = {}
 
-def connect_to_mongodb(retry_count=5, retry_delay=5):
-    """Establish connection to MongoDB with retry mechanism."""
+def connect_to_mongodb(retry_count=5, initial_delay=1):
+    """Establish connection to MongoDB with retry mechanism and exponential backoff."""
     global mongo_client, db, raw_messages_col, failed_messages_col
+    delay = initial_delay
     for attempt in range(retry_count):
         try:
             mongo_client = MongoClient(
@@ -60,153 +59,158 @@ def connect_to_mongodb(retry_count=5, retry_delay=5):
         except errors.PyMongoError as e:
             logger.error(f"Connection failed (attempt {attempt+1}/{retry_count}): {e}")
             if attempt < retry_count - 1:
-                time.sleep(retry_delay)
-    logger.error("Failed to connect to MongoDB")
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff
+    logger.error("Failed to connect to MongoDB after retries")
     raise SystemExit(1)
 
-def connect_mqtt(topic: str) -> mqtt_client.Client:
-    """Connect to MQTT broker and set up callbacks for a specific topic."""
-    client_id = f"player_{PLAYER_ID}_{topic.split('_')[1]}_raw"
-    client = mqtt_client.Client(client_id=client_id)
-
-    def on_connect(c, u, f, rc):
-        logger.info(f"Client for topic {topic} connected with result code {rc}")
-        c.subscribe(topic, qos=1)
-
-    def on_message(c, u, msg):
-        logger.debug(f"Received message on topic {topic}: QoS={msg.qos}, MID={msg.mid}")
-        topic_queues[topic].put(msg)
-
-    client.on_connect = on_connect
-    client.on_message = on_message
-    try:
-        client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
-        logger.info(f"MQTT client for topic {topic} connected successfully")
-    except Exception as e:
-        logger.error(f"Failed to connect MQTT client for topic {topic}: {e}")
-        raise
-    return client
-
 def worker(topic: str, message_map: dict, hash_map: dict):
-    """Process messages from the queue with duplicate checks."""
+    """Process messages from the queue with duplicate checks and robust MongoDB writes."""
     cleanup_counter = 0
     while True:
-        msg = topic_queues[topic].get()
-        if msg is None:
-            break
         try:
-            payload_str = msg.payload.decode().strip()
-            hash_value = hashlib.md5(msg.payload).hexdigest()
-            current_time = time.time()
-            is_duplicate = False
-
+            msg = topic_queues[topic].get()
+            if msg is None:
+                break
+            document = {
+                "topic": msg.topic,
+                "session_id": SESSION_ID,
+                "timestamp": datetime.now(),
+            }
             if msg.qos > 0:
-                # if msg.mid in message_map:
-                #     is_duplicate = True
-                #     logger.debug(f"Duplicate QoS 1 message ID {msg.mid} for topic {topic}")
-                # else:
-                #     message_map[msg.mid] = hash_value
-                logger.debug(f"Added message ID {msg.mid} with hash {hash_value} for topic {topic}")
-            # elif msg.qos == 2:
-            #         logger.debug("Received message with qos 2") 
-            else:
-                if hash_value in hash_map and (current_time - hash_map[hash_value]) < TIME_BETWEEN_MARSAMI_MOVEMENTS:
-                    is_duplicate = True
-                    logger.debug(f"Duplicate QoS 0 content hash {hash_value} for topic {topic}")
-                hash_map[hash_value] = current_time
+                document["message_id"] = msg.mid
+                document["QOS"] = msg.qos
 
-            if is_duplicate:
-                failed_messages_col.insert_one({
-                    "topic": msg.topic,
-                    "session_id": SESSION_ID,
-                    "payload": payload_str,
-                    "reason": "Duplicate message",
-                    "timestamp": datetime.now(),
-                    "processed": True,
-                    "message_id": msg.mid if msg.qos > 0 else None,
-                    "QOS": msg.qos if msg.qos > 0 else None
-                })
-                logger.info(f"Duplicate message from {topic}: QoS={msg.qos}, MID={msg.mid}")
-            else:
-                document = {
-                    "topic": msg.topic,
-                    "session_id": SESSION_ID,
-                    "payload": payload_str,
-                    "timestamp": datetime.now(),
-                    "processed": False,
-                }
-                if msg.qos > 0:
-                    document["message_id"] = msg.mid
-                    document["QOS"] = msg.qos
-                for attempt in range(3):
-                    try:
-                        raw_messages_col.insert_one(document)
-                        logger.info(f"Inserted message from {topic}: QoS={msg.qos}, MID={msg.mid}")
+            try:
+                payload_str = msg.payload.decode().strip()
+                document["payload"] = payload_str
+                hash_value = hashlib.md5(msg.payload).hexdigest()
+                current_time = time.time()
+                is_duplicate = False
+
+                # Duplicate check
+                if msg.qos == 1:
+                    if hash_value == message_map.get(msg.mid):
+                        is_duplicate = True
+                        logger.debug(f"Duplicate QoS 1 message ID {msg.mid} for topic {topic}")
+                    else:
+                        message_map[msg.mid] = hash_value
+                    logger.debug(f"Added message ID {msg.mid} with hash {hash_value} for topic {topic}")
+
+                    if hash_value in hash_map and (current_time - hash_map[hash_value]) < TIME_BETWEEN_MARSAMI_MOVEMENTS:
+                        is_duplicate = True
+                        logger.debug(f"Duplicate content hash {hash_value} for topic {topic}")
+                    hash_map[hash_value] = current_time
+                else:
+                    if hash_value in hash_map and (current_time - hash_map[hash_value]) < TIME_BETWEEN_MARSAMI_MOVEMENTS:
+                        is_duplicate = True
+                        logger.debug(f"Duplicate QoS 0 content hash {hash_value} for topic {topic}")
+                    hash_map[hash_value] = current_time
+
+                if is_duplicate:
+                    document["processed"] = True
+                    document["reason"] = "Duplicate message"
+                else:
+                    document["processed"] = False
+
+            except Exception as e:
+                logger.error(f"Error processing message from {topic}: {e}")
+                document["payload"] = msg.payload.decode(errors='ignore').strip()
+                document["processed"] = True
+                document["error"] = str(e)
+
+            # Attempt to insert into raw_messages with retries
+            for attempt in range(3):
+                try:
+                    raw_messages_col.insert_one(document)
+                    logger.info(f"Inserted message from {topic}: QoS={msg.qos}, MID={msg.mid}, processed={document['processed']}")
+                    break
+                except errors.PyMongoError as e:
+                    if attempt < 2:
+                        logger.warning(f"Retry {attempt+1}/3 for insert: {e}")
+                        time.sleep(1)
+                    else:
+                        logger.error(f"Failed to insert message from {topic} after 3 attempts: {e}")
+                        try:
+                            failed_messages_col.insert_one(document)
+                            logger.info(f"Inserted message into failed_messages from {topic}")
+                        except Exception as fallback_e:
+                            logger.error(f"Failed to insert into failed_messages: {fallback_e}")
                         break
-                    except errors.PyMongoError as e:
-                        if attempt < 2:
-                            logger.warning(f"Retry {attempt+1}/3 for insert: {e}")
-                            time.sleep(1)
-                        else:
-                            raise
 
-            # Periodic cleanup of hash_map for QoS 0 messages
+            # Periodic cleanup of hash_map
             cleanup_counter += 1
             if cleanup_counter >= 100:
                 cleanup_counter = 0
+                current_time = time.time()
                 to_remove = [k for k, v in hash_map.items() if current_time - v > 1]
                 for k in to_remove:
                     del hash_map[k]
                 logger.debug(f"Cleaned up {len(to_remove)} old entries from hash_map for topic {topic}")
 
         except Exception as e:
-            logger.error(f"Error processing message from {topic}: {e}")
-            failed_messages_col.insert_one({
-                "topic": msg.topic,
-                "session_id": SESSION_ID,
-                "payload": payload_str,
-                "error": str(e),
-                "timestamp": datetime.now(),
-                "processed": True,
-                "message_id": msg.mid if msg.qos > 0 else None,
-                "QOS": msg.qos if msg.qos > 0 else None
-            })
+            logger.error(f"Unexpected error in worker for topic {topic}: {e}")
         finally:
             topic_queues[topic].task_done()
 
-def start_client_loop(client: mqtt_client.Client, topic: str):
-    """Run the MQTT client loop for a specific topic."""
-    try:
-        client.loop_forever()
-    except Exception as e:
-        logger.error(f"MQTT client loop for topic {topic} failed: {e}")
-
 def main():
     """Main function to set up connections and start threads."""
-    connect_to_mongodb()
-    message_maps = {topic: {} for topic in TOPICS}  # message_id : hash_value | for QoS 1 in case of duplicates from the MQTT
-    hash_maps = {topic: {} for topic in TOPICS}    # hash_value : timestamp  | for QoS 0/2 in case of duplicates from the sensor
+    required_env_vars = ["PLAYER_ID", "SESSION_ID", "MQTT_BROKER", "MQTT_PORT"]
+    for var in required_env_vars:
+        if not os.getenv(var):
+            logger.error(f"Missing required environment variable: {var}")
+            raise SystemExit(1)
 
+    connect_to_mongodb()
+    message_maps = {topic: {} for topic in TOPICS}
+    hash_maps = {topic: {} for topic in TOPICS}
+
+    client_id = f"player_{PLAYER_ID}_raw"
+    client = mqtt_client.Client(client_id=client_id)
+
+    def on_connect(c, u, f, rc):
+        logger.info(f"Connected with result code {rc}")
+        subscriptions = [(topic, 1) for topic in TOPICS]
+        result, mid = c.subscribe(subscriptions)
+        if result == mqtt_client.MQTT_ERR_SUCCESS:
+            logger.info(f"Subscribed to topics with mid {mid}")
+        else:
+            logger.error(f"Subscription failed with result {result}")
+
+    def on_message(c, u, msg):
+        if msg.topic in topic_queues:
+            topic_queues[msg.topic].put(msg)
+            logger.debug(f"Received message on topic {msg.topic}: QoS={msg.qos}, MID={msg.mid}")
+        else:
+            logger.warning(f"Received message on unknown topic: {msg.topic}")
+
+    client.on_connect = on_connect
+    client.on_message = on_message
+
+    try:
+        client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+        logger.info("MQTT client connected successfully")
+    except Exception as e:
+        logger.error(f"Failed to connect MQTT client: {e}")
+        raise
+
+    # Start worker threads
+    worker_threads = {}
     for topic in TOPICS:
-        client = connect_mqtt(topic)
-        topic_clients[topic] = client
         worker_thread = threading.Thread(
             target=worker,
             args=(topic, message_maps[topic], hash_maps[topic]),
             daemon=True
         )
         worker_thread.start()
-        topic_threads[topic] = worker_thread
-        client_thread = threading.Thread(
-            target=start_client_loop,
-            args=(client, topic),
-            daemon=True
-        )
-        client_thread.start()
+        worker_threads[topic] = worker_thread
+
+    # Start client loop
+    client.loop_start()
 
     while True:
         time.sleep(60)
 
 if __name__ == "__main__":
-    logger.info(f"Starting MQTT listeners for player {PLAYER_ID} on topics: {TOPICS}")
+    logger.info(f"Starting MQTT listener for player {PLAYER_ID} on topics: {TOPICS}")
     main()
