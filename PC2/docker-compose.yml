@@ -6,7 +6,7 @@ services:
       - "3306:3306"
     environment:
       MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: labirinto_mysql
+      MYSQL_DATABASE: mydb
       MYSQL_USER: labuser
       MYSQL_PASSWORD: labpass
     volumes:
@@ -15,6 +15,25 @@ services:
     networks:
       - mysql-network
 
+  mongodb_to_mysql:
+    build: ./mongodb_to_mysql
+    depends_on:
+      - mysql
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: labuser
+      MYSQL_PASSWORD: labpass
+      MYSQL_DATABASE: mydb
+      MQTT_BROKER: test.mosquitto.org
+      MQTT_PORT: 1883
+      PLAYER_ID: 33
+      MQTT_QOS: 2
+      GAME_ID: 1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+    networks:
+      - mysql-network
   php:
     build: ./php
     container_name: php

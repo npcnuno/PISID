@@ -64,7 +64,7 @@ CREATE TABLE `Mensagens` (
   `sensor` int(11) DEFAULT NULL,
   `leitura` double DEFAULT NULL,
   `tipoAlerta` varchar(50) DEFAULT NULL,
-  `mensagem` varchar(100) DEFAULT NULL,
+  `mensagem` varchar(300) DEFAULT NULL,
   `horaEscrita` timestamp NULL DEFAULT NULL,
   `idJogo` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -78,7 +78,7 @@ CREATE TABLE `Mensagens` (
 CREATE TABLE `OcupacaoLabirinto` (
   `sala` int(11) NOT NULL,
   `numeroMarsamiOdd` int(11) DEFAULT NULL,
-  `numeroMarsamiEven` varchar(45) DEFAULT NULL,
+  `numeroMarsamiEven` int(11) DEFAULT NULL,
   `score` int(11) NOT NULL,
   `idJogo` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -92,7 +92,7 @@ CREATE TABLE `OcupacaoLabirinto` (
 CREATE TABLE `Sound` (
   `idSound` int(11) NOT NULL,
   `hora` timestamp NULL DEFAULT NULL,
-  `Soundcol` varchar(12) DEFAULT NULL,
+  `sound` double(12,9) DEFAULT NULL,
   `idJogo` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
