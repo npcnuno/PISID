@@ -7,4 +7,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["python", "mqtt_to_mongodb.py"]
+CMD ["python", "mongodb_to_mysql.py"]

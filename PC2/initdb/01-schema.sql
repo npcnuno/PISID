@@ -1,53 +1,223 @@
+-- phpMyAdmin SQL Dump
+-- version 5.2.1
+-- https://www.phpmyadmin.net/
+--
+-- Host: localhost
+-- Generation Time: Apr 30, 2025 at 01:13 AM
+-- Server version: 10.4.32-MariaDB
+-- PHP Version: 8.2.12
 
--- initdb/01-schema.sql
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
 
-CREATE DATABASE IF NOT EXISTS labirinto_mysql;
-USE labirinto_mysql;
 
--- Jogo
-CREATE TABLE IF NOT EXISTS Jogo (
-  IDJogo INT AUTO_INCREMENT PRIMARY KEY,
-  Descricao TEXT,
-  jogador VARCHAR(50),
-  DataHoraInicio TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
 
--- MedicoesPassagens
-CREATE TABLE IF NOT EXISTS MedicoesPassagens (
-  IDMedicao INT AUTO_INCREMENT PRIMARY KEY,
-  Hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  SalaOrigem INT,
-  SalaDestino INT,
-  Marsami INT,
-  Status INT
-);
+--
+-- Database: `mydb`
+--
 
--- Utilizador
-CREATE TABLE IF NOT EXISTS Utilizador (
-  Nome VARCHAR(100),
-  Telemovel VARCHAR(12),
-  Tipo VARCHAR(3),
-  Email VARCHAR(50)
-);
+-- --------------------------------------------------------
 
--- Mensagens
-CREATE TABLE IF NOT EXISTS Mensagens (
-  ID INT AUTO_INCREMENT PRIMARY KEY,
-  Hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  Sala INT,
-  Sensor INT,
-  Leitura DECIMAL(6,2),
-  TipoArea INT,
-  MsgExtra VARCHAR(255),
-  HoraEscrita TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+--
+-- Table structure for table `Jogo`
+--
 
--- OcupacaoLabirinto
-CREATE TABLE IF NOT EXISTS OcupacaoLabirinto (
-  IDJogo INT,
-  NumeroMarsamisOdd INT,
-  NumeroMarsamisEven INT,
-  Sala INT
-);
+CREATE TABLE `Jogo` (
+  `idJogo` int(11) NOT NULL,
+  `email` varchar(50) DEFAULT NULL,
+  `descricao` text DEFAULT NULL,
+  `jogador` varchar(50) DEFAULT NULL,
+  `scoreTotal` int(11) NOT NULL,
+  `dataHoraInicio` varchar(45) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Any additional tables can go here
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `MedicaoPassagem`
+--
+
+CREATE TABLE `MedicaoPassagem` (
+  `idMedicao` int(11) NOT NULL,
+  `hora` timestamp NULL DEFAULT NULL,
+  `salaOrigem` int(11) DEFAULT NULL,
+  `salaDestino` int(11) DEFAULT NULL,
+  `marsami` int(11) DEFAULT NULL,
+  `status` int(11) DEFAULT NULL,
+  `idJogo` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `Mensagens`
+--
+
+CREATE TABLE `Mensagens` (
+  `idMensagem` int(11) NOT NULL,
+  `hora` timestamp NULL DEFAULT NULL,
+  `sensor` int(11) DEFAULT NULL,
+  `leitura` double DEFAULT NULL,
+  `tipoAlerta` varchar(50) DEFAULT NULL,
+  `mensagem` varchar(100) DEFAULT NULL,
+  `horaEscrita` timestamp NULL DEFAULT NULL,
+  `idJogo` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `OcupacaoLabirinto`
+--
+
+CREATE TABLE `OcupacaoLabirinto` (
+  `sala` int(11) NOT NULL,
+  `numeroMarsamiOdd` int(11) DEFAULT NULL,
+  `numeroMarsamiEven` varchar(45) DEFAULT NULL,
+  `score` int(11) NOT NULL,
+  `idJogo` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `Sound`
+--
+
+CREATE TABLE `Sound` (
+  `idSound` int(11) NOT NULL,
+  `hora` timestamp NULL DEFAULT NULL,
+  `Soundcol` varchar(12) DEFAULT NULL,
+  `idJogo` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `User`
+--
+
+CREATE TABLE `User` (
+  `email` varchar(50) NOT NULL,
+  `nome` varchar(100) DEFAULT NULL,
+  `telemovel` varchar(12) DEFAULT NULL,
+  `tipo` varchar(3) DEFAULT NULL,
+  `grupo` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Indexes for dumped tables
+--
+
+--
+-- Indexes for table `Jogo`
+--
+ALTER TABLE `Jogo`
+  ADD PRIMARY KEY (`idJogo`),
+  ADD KEY `fk_Jogo_email_idx` (`email`);
+
+--
+-- Indexes for table `MedicaoPassagem`
+--
+ALTER TABLE `MedicaoPassagem`
+  ADD PRIMARY KEY (`idMedicao`),
+  ADD KEY `fk_Medicao_Jogo_idx` (`idJogo`);
+
+--
+-- Indexes for table `Mensagens`
+--
+ALTER TABLE `Mensagens`
+  ADD PRIMARY KEY (`idMensagem`),
+  ADD KEY `fk_Alerta_Jogo_idx` (`idJogo`);
+
+--
+-- Indexes for table `OcupacaoLabirinto`
+--
+ALTER TABLE `OcupacaoLabirinto`
+  ADD PRIMARY KEY (`sala`),
+  ADD KEY `fk_Ocupacao_Jogo_idx` (`idJogo`);
+
+--
+-- Indexes for table `Sound`
+--
+ALTER TABLE `Sound`
+  ADD PRIMARY KEY (`idSound`),
+  ADD KEY `fk_Sound_Jogo_idx` (`idJogo`);
+
+--
+-- Indexes for table `User`
+--
+ALTER TABLE `User`
+  ADD PRIMARY KEY (`email`);
+
+--
+-- AUTO_INCREMENT for dumped tables
+--
+
+--
+-- AUTO_INCREMENT for table `Jogo`
+--
+ALTER TABLE `Jogo`
+  MODIFY `idJogo` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `MedicaoPassagem`
+--
+ALTER TABLE `MedicaoPassagem`
+  MODIFY `idMedicao` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `Mensagens`
+--
+ALTER TABLE `Mensagens`
+  MODIFY `idMensagem` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `Sound`
+--
+ALTER TABLE `Sound`
+  MODIFY `idSound` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- Constraints for dumped tables
+--
+
+--
+-- Constraints for table `Jogo`
+--
+ALTER TABLE `Jogo`
+  ADD CONSTRAINT `fk_Jogo_email` FOREIGN KEY (`email`) REFERENCES `User` (`email`) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+--
+-- Constraints for table `MedicaoPassagem`
+--
+ALTER TABLE `MedicaoPassagem`
+  ADD CONSTRAINT `fk_Medicao_Jogo` FOREIGN KEY (`idJogo`) REFERENCES `Jogo` (`idJogo`) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+--
+-- Constraints for table `Mensagens`
+--
+ALTER TABLE `Mensagens`
+  ADD CONSTRAINT `fk_Alerta_Jogo` FOREIGN KEY (`idJogo`) REFERENCES `Jogo` (`idJogo`) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+--
+-- Constraints for table `OcupacaoLabirinto`
+--
+ALTER TABLE `OcupacaoLabirinto`
+  ADD CONSTRAINT `fk_Ocupacao_Jogo` FOREIGN KEY (`idJogo`) REFERENCES `Jogo` (`idJogo`) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+--
+-- Constraints for table `Sound`
+--
+ALTER TABLE `Sound`
+  ADD CONSTRAINT `fk_Sound_Jogo` FOREIGN KEY (`idJogo`) REFERENCES `Jogo` (`idJogo`) ON DELETE NO ACTION ON UPDATE NO ACTION;
+COMMIT;
+
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
