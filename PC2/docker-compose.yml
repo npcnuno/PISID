@@ -15,6 +15,19 @@ services:
     networks:
       - mysql-network
 
+  php:
+    build: ./php
+    container_name: php
+    depends_on:
+      - mysql
+    ports:
+      - "5000:5000"               # Apache inside listens on 80
+
+    networks:
+      - mysql-network
+    restart: always
+
+
   # mongodb_to_mysql:
   #   build: ./mongodb_to_mysql
   #   depends_on:
