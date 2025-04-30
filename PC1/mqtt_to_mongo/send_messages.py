@@ -1,5 +1,6 @@
 import os
 from pymongo import MongoClient, errors
+from bson.objectid import ObjectId
 import logging
 from datetime import datetime
 import time
@@ -29,16 +30,21 @@ MONGO_URI = os.getenv('MONGO_URI', (
 MQTT_BROKER = "test.mosquitto.org"
 MQTT_PORT = 1883
 PLAYER_ID = int(os.getenv('PLAYER_ID', '33'))
-MQTT_TOPICS = os.getenv("MQTT_TOPICS",{
+SESSION_ID = os.getenv('SESSION_ID', 'default_session')
+MQTT_TOPICS = {
     "move_messages": f"pisid_mazemov_{PLAYER_ID}_processed",
     "sound_messages": f"pisid_mazesound_{PLAYER_ID}_processed"
-})
-
-QOS = int(os.getenv("QOS", 2))  # At-least-once delivery
+}
+CONFIRMED_TOPICS = {
+    "move_messages": f"pisid_mazemov_{PLAYER_ID}_confirmed",
+    "sound_messages": f"pisid_mazesound_{PLAYER_ID}_confirmed"
+}
+QOS = int(os.getenv("QOS", 2))
+POLL_INTERVAL = 5
 
 # Message Queues
-publish_queue = queue.Queue()  # For sending messages to MQTT
-sent_queue = queue.Queue()     # For marking messages as sent
+move_queue = queue.Queue()
+sound_queue = queue.Queue()
 queue_lock = Lock()
 
 def connect_to_mongodb(retry_count=5, retry_delay=5):
@@ -61,13 +67,12 @@ def connect_to_mongodb(retry_count=5, retry_delay=5):
             if attempt < retry_count - 1:
                 time.sleep(retry_delay)
     logger.error("Failed to connect to MongoDB")
-    raise SystemExit( 1)
+    raise SystemExit(1)
 
 def connect_to_mqtt():
-    """Connect to MQTT broker"""
     client = mqtt_client.Client(client_id=f"player_{PLAYER_ID}_sender", protocol=mqtt_client.MQTTv5)
     client.on_connect = on_connect
-    client.on_publish = on_publish
+    client.on_message = on_message
     while True:
         try:
             client.connect(MQTT_BROKER, MQTT_PORT)
@@ -79,127 +84,132 @@ def connect_to_mqtt():
             time.sleep(5)
 
 def on_connect(client, userdata, flags, reason_code, properties=None):
-    """Callback for MQTT connection"""
     if reason_code == 0:
         logger.info("MQTT connected successfully")
+        client.subscribe(CONFIRMED_TOPICS["move_messages"], qos=QOS)
+        client.subscribe(CONFIRMED_TOPICS["sound_messages"], qos=QOS)
     else:
         logger.error(f"MQTT connection failed: {reason_code}")
 
-def on_publish(client, userdata, mid):
-    """Callback for when a message is published and acknowledged"""
-    with queue_lock:
-        sent_queue.put(mid)
-    logger.info(f"Message {mid} acknowledged by broker")
+def on_message(client, userdata, msg):
+    topic = msg.topic
+    try:
+        ack_payload = json.loads(msg.payload.decode('utf-8'))
+        message_id = ack_payload["_id"]
+        collection = db["move_messages"] if topic == CONFIRMED_TOPICS["move_messages"] else db["sound_messages"]
+        result = collection.update_one(
+            {"_id": ObjectId(message_id), "processed": False},
+            {"$set": {"processed": True}}
+        )
+        if result.modified_count > 0:
+            logger.info(f"Marked message with _id {message_id} as processed")
+        else:
+            logger.warning(f"No message found with _id {message_id} or already processed")
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse ack payload: {e}")
+    except KeyError as e:
+        logger.error(f"Missing key in ack payload: {e}")
+    except errors.PyMongoError as e:
+        logger.error(f"MongoDB error while processing ack: {e}")
 
-def worker_publish(mqtt_client_instance):
-    """Worker thread to publish messages to MQTT"""
+def worker_publish(mqtt_client_instance, topic, message_queue):
     while True:
-        message_data = publish_queue.get()
+        message_data = message_queue.get()
         try:
-            message_id = message_data["message_id"]
-            topic = message_data["topic"]
-            payload = message_data["payload"]
-            
-            if "hour" in payload:
+            payload = {
+                k: v for k, v in message_data.items()
+                if k not in ["_id", "session_id", "sent", "processed", "timestamp"]
+            }
+            payload["_id"] = str(message_data["_id"])
+            if topic == MQTT_TOPICS["sound_messages"] and "hour" in payload:
                 if isinstance(payload["hour"], datetime):
                     payload["hour"] = payload["hour"].isoformat()
-            
-            result = mqtt_client_instance.publish(topic, json.dumps(payload), qos=QOS)
-            if result.rc == mqtt_client.MQTT_ERR_SUCCESS:
-                logger.info(f"Published message {message_id} (MID {result.mid}) to {topic}")
-                with queue_lock:
-                    message_data["mid"] = result.mid
-                    pending_messages[result.mid] = message_data
-            else:
-                logger.error(f"Failed to publish message {message_id} to {topic}: {result.rc}")
+            mqtt_client_instance.publish(topic, json.dumps(payload), qos=QOS)
         except Exception as e:
-            logger.error(f"Error publishing message {message_id}: {e}")
+            logger.error(f"Error publishing message: {e}")
         finally:
-            publish_queue.task_done()
+            message_queue.task_done()
 
-def worker_mark_sent(db):
-    """Worker thread to mark messages as sent after acknowledgment"""
+def stream_mazemov():
+    """Purpose: Streams new mazemov messages from move_messages using MongoDB change streams.
+    Execution Flow:
+    1. Enter an infinite loop to continuously watch for changes.
+    2. Use move_messages_col.watch with a filter for inserts matching SESSION_ID and unprocessed status.
+    3. For each change, get the full document and check if it’s unprocessed.
+    4. If valid, queue it in move_queue and log at debug level.
+    5. On PyMongoError, log the error, fall back to polling unprocessed mazemov messages, and sleep POLL_INTERVAL.
+    6. On other exceptions, log and sleep 5 seconds before retrying."""
     move_messages_col = db["move_messages"]
-    sound_messages_col = db["sound_messages"]
-    
     while True:
-        mid = sent_queue.get()
         try:
-            with queue_lock:
-                if mid in pending_messages:
-                    message_data = pending_messages.pop(mid)
-                    message_id = message_data["message_id"]
-                    collection_name = message_data["collection_name"]
-                    
-                    # Mark as sent in MongoDB
-                    collection = move_messages_col if collection_name == "move_messages" else sound_messages_col
-                    collection.update_one(
-                        {"_id": message_id},
-                        {"$set": {"processed": True}}
-                    )
-                    logger.info(f"Marked message {message_id} as sent after acknowledgment (MID {mid})")
+            with move_messages_col.watch(
+                [{"$match": {"operationType": "insert", "fullDocument.session_id": SESSION_ID}}],
+                full_document='updateLookup'
+            ) as stream:
+                for change in stream:
+                    doc = change["fullDocument"]
+                    if doc.get("processed") != True:
+                        move_queue.put(doc)
+                        logger.debug(f"Streamed mazemov message {doc['_id']}")
         except errors.PyMongoError as e:
-            logger.error(f"Failed to mark message {message_id} as sent: {e}")
-        finally:
-            sent_queue.task_done()
+            logger.error(f"Mazemov stream error: {e}, falling back to polling")
+            messages = move_messages_col.find({"session_id": SESSION_ID, "processed": {"$ne": True}})
+            for msg in messages:
+                move_queue.put(msg)
+                logger.debug(f"Polled mazemov message {msg['_id']}")
+            time.sleep(POLL_INTERVAL)
+        except Exception as e:
+            logger.error(f"Mazemov stream unexpected error: {e}")
+            time.sleep(5)
 
-def mark_messages_as_sent(mongo_client, mqtt_client):
-    """Continuously find unsent messages and queue them for publishing"""
-    db = mongo_client[MONGO_DB]
-    move_messages_col = db["move_messages"]
+def stream_mazesound():
+    """Purpose: Streams new mazesound messages from sound_messages using MongoDB change streams.
+    Execution Flow:
+    1. Enter an infinite loop to watch for changes.
+    2. Use sound_messages_col.watch with a filter for inserts matching SESSION_ID and unprocessed status.
+    3. For each change, get the full document and check if it’s unprocessed.
+    4. If valid, queue it in sound_queue and log at debug level.
+    5. On PyMongoError, log the error, fall back to polling unprocessed mazesound messages, and sleep POLL_INTERVAL.
+    6. On other exceptions, log and sleep 5 seconds before retrying."""
     sound_messages_col = db["sound_messages"]
-    
-    # Global dict to track pending messages by MID
-    global pending_messages
-    pending_messages = {}
-    
-    # Start worker threads
-    for _ in range(2):  # Two threads for publishing
-        Thread(target=worker_publish, args=(mqtt_client,), daemon=True).start()
-    Thread(target=worker_mark_sent, args=(db,), daemon=True).start()  # One thread for marking sent
-    
     while True:
         try:
-            for collection, message_type in [
-                (move_messages_col, "move_messages"),
-                (sound_messages_col, "sound_messages")
-            ]:
-                unsent_messages = collection.find({"processed": False})
-                for message in unsent_messages:
-                    message_id = message["_id"]
-                    try:
-                        # Prepare payload, excluding all timestamps except 'hour'
-                        payload = {
-                            k: v for k, v in message.items()
-                            if k not in ["_id", "session_id", "processed", "timestamp"]
-                        }
-                        # Ensure 'hour' is included as a string for sound messages
-                        if message_type == "sound_messages" and "Hour" in message:
-                            if isinstance(message["Hour"], datetime):
-                                payload["Hour"] = message["Hour"].isoformat()
-                            else:
-                                payload["Hour"] = str(message["Hour"])                         
-                        # Queue the message for publishing
-                        with queue_lock:
-                            publish_queue.put({
-                                "message_id": message_id,
-                                "collection_name": message_type,
-                                "topic": MQTT_TOPICS[message_type],
-                                "payload": payload
-                            })
-                            logger.info(f"Queued message {message_id} for publishing to {MQTT_TOPICS[message_type]}")
-                    except Exception as e:
-                        logger.error(f"Error queuing message {message_id}: {e}")
-            time.sleep(1)  # Check every second
+            with sound_messages_col.watch(
+                [{"$match": {"operationType": "insert", "fullDocument.session_id": SESSION_ID}}],
+                full_document='updateLookup'
+            ) as stream:
+                for change in stream:
+                    doc = change["fullDocument"]
+                    if doc.get("processed") != True:
+                        sound_queue.put(doc)
+                        logger.debug(f"Streamed mazesound message {doc['_id']}")
+        except errors.PyMongoError as e:
+            logger.error(f"Mazesound stream error: {e}, falling back to polling")
+            messages = sound_messages_col.find({"session_id": SESSION_ID, "processed": {"$ne": True}})
+            for msg in messages:
+                sound_queue.put(msg)
+                logger.debug(f"Polled mazesound message {msg['_id']}")
+            time.sleep(POLL_INTERVAL)
         except Exception as e:
-            logger.error(f"Error in mark_messages_as_sent: {e}")
-            time.sleep(5)  # Wait before retrying on major error
+            logger.error(f"Mazesound stream unexpected error: {e}")
+            time.sleep(5)
 
 def main():
     mongo_client = connect_to_mongodb()
     mqtt_client = connect_to_mqtt()
+    db = mongo_client[MONGO_DB]
+
+    # Start worker threads for publishing
+    Thread(target=worker_publish, args=(mqtt_client, MQTT_TOPICS["move_messages"], move_queue), daemon=True).start()
+    Thread(target=worker_publish, args=(mqtt_client, MQTT_TOPICS["sound_messages"], sound_queue), daemon=True).start()
+
+    # Start streaming threads
+    Thread(target=stream_mazemov, daemon=True).start()
+    Thread(target=stream_mazesound, daemon=True).start()
+
     try:
-        mark_messages_as_sent(mongo_client, mqtt_client)
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully")
         mqtt_client.loop_stop()
