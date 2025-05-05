@@ -4,7 +4,7 @@ import time
 import queue
 import logging
 from threading import Thread
-import mysql.connector
+import mysql.connector 
 from paho.mqtt import client as mqtt_client
 from datetime import datetime
 
@@ -12,7 +12,7 @@ from datetime import datetime
 logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Environment variables with defaults
+# Environment variables with default
 MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')
 MYSQL_USER = os.getenv('MYSQL_USER', 'labuser')
 MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'password')
@@ -34,6 +34,7 @@ BASENOISE = 0.0
 TOLERABLENOISEVARIATION = 0.0
 movement_queue = queue.Queue()
 sound_queue = queue.Queue()
+
 
 def initialize_game():
     """Initialize the game by creating a user and game entry in MySQL if they don't exist."""
@@ -184,22 +185,18 @@ def worker_mazemov():
             marsami = payload["marsami"]
             status = payload["status"]
 
-            # Always insert the movement message
+            #NOTE:  insert the movement message
             sql = """INSERT INTO MedicaoPassagem (hora, salaOrigem, salaDestino, marsami, status, idJogo)
                      VALUES (NOW(), %s, %s, %s, %s, %s)"""
             params = (origin_room, destination_room, marsami, status, game_id)
             cursor.execute(sql, params)
             mysql_conn.commit()
-            logger.info(f"Inserted movement message for player {payload['player']}")
-
-            # Log a warning if the corridor is invalid
-            if (origin_room, destination_room) not in CORRIDOR_MAP:
-                logger.warning(f"Invalid movement from {origin_room} to {destination_room} via marsami {marsami}")
-
-            # Send acknowledgment
-            ack_payload = {"_id": message_id}
+            last_inserted_id = cursor.lastrowid
+            logger.info(f"Inserted movement message for player {payload['player']} with MySQL ID {last_inserted_id}")
+            #NOTE: Send acknowledgment
+            ack_payload = {"_id": message_id, "mysqlID": last_inserted_id}
             mqtt_instance.publish(ack_topic, json.dumps(ack_payload), qos=MQTT_QOS)
-            logger.info(f"Sent ACK to {ack_topic} with _id {message_id}")
+            logger.info(f"Sent ACK to {ack_topic} with _id {message_id} and mysqlID {last_inserted_id}")
 
         except KeyError as e:
             logger.error(f"Missing key in movement payload: {e}")
@@ -242,23 +239,18 @@ def worker_mazesound():
             sound_level = float(payload["sound"])
             formatted_sound = f"{sound_level:.4f}"[:12]
 
-            # Always insert the sound message
+            #NOTE: insert the sound message
             sql = """INSERT INTO Sound (hora, sound, idJogo)
                      VALUES (FROM_UNIXTIME(%s), %s, %s)"""
             params = (timestamp, formatted_sound, game_id)
             cursor.execute(sql, params)
             mysql_conn.commit()
-            logger.info(f"Inserted sound message for player {payload['player']}")
-
-            # Log a warning if the sound level is out of tolerance
-            if not (BASENOISE - TOLERABLENOISEVARIATION <= sound_level <= BASENOISE + TOLERABLENOISEVARIATION):
-                logger.warning(f"Sound level {sound_level} dB out of tolerance")
-
-            # Send acknowledgment
-            ack_payload = {"_id": message_id}
+            last_inserted_id = cursor.lastrowid
+            logger.info(f"Inserted sound message for player {payload['player']} with MySQL ID {last_inserted_id}")
+            #NOTE: Send acknowledgment
+            ack_payload = {"_id": message_id, "mysqlID": last_inserted_id}
             mqtt_instance.publish(ack_topic, json.dumps(ack_payload), qos=MQTT_QOS)
-            logger.info(f"Sent ACK to {ack_topic} with _id {message_id}")
-
+            logger.info(f"Sent ACK to {ack_topic} with _id {message_id} and mysqlID {last_inserted_id}")
         except KeyError as e:
             logger.error(f"Missing key in sound payload: {e}")
         except ValueError as e:
@@ -279,7 +271,7 @@ if __name__ == "__main__":
     initialize_game()
     fetch_corridor_data()
     fetch_setupmaze_data()
-
+    
     movement_thread = Thread(target=worker_mazemov, daemon=True)
     sound_thread = Thread(target=worker_mazesound, daemon=True)
     movement_thread.start()

@@ -15,8 +15,8 @@ services:
     networks:
       - mysql-network
 
-  mongodb_to_mysql:
-    build: ./mongodb_to_mysql
+  mysql_to_cloud:
+    build: ./mysql_to_cloud
     depends_on:
       - mysql
     environment:
@@ -40,12 +40,11 @@ services:
     depends_on:
       - mysql
     ports:
-      - "5000:5000"               # Apache inside listens on 80
+      - "5000:5000" # Apache inside listens on 80
 
     networks:
       - mysql-network
     restart: always
-
 
   # mongodb_to_mysql:
   #   build: ./mongodb_to_mysql
