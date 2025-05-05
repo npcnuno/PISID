@@ -10,7 +10,6 @@ services:
       MYSQL_USER: labuser
       MYSQL_PASSWORD: labpass
     volumes:
-      - mysql_data:/var/lib/mysql
       - ./initdb:/docker-entrypoint-initdb.d
     networks:
       - mysql-network
