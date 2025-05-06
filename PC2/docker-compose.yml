@@ -39,7 +39,7 @@ services:
     depends_on:
       - mysql
     ports:
-      - "5000:5000" # Apache inside listens on 80
+      - "5001:5000"               # Apache inside listens on 80
 
     networks:
       - mysql-network
