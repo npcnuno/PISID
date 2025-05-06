@@ -312,60 +312,6 @@ END $$
 
 DELIMITER ;
 
-DELIMITER $$
-
-CREATE DEFINER=`root`@`%` PROCEDURE Alterar_jogo(
-	IN p_idJogo INT,
-    IN p_descricao TEXT,
-    IN p_jogador VARCHAR(100)
-    #IN p_scoreTotal INT,
-    #IN p_dataHorainicio DATETIME
-)
-BEGIN
-	DECLARE v_requestEmail VARCHAR(50);
-    DECLARE v_userType VARCHAR(20);
-    DECLARE v_gameIsRunning BOOLEAN; -- 0 (isRunnig) 1 (gameEnd)
-    DECLARE v_gameList VARCHAR(50);
-
-	-- Método para obter o email do usuário atual
-    SET v_requestEmail = CURRENT_USER();
-
-    -- Verifica se o jogo existe e obtém o proprietário do email do dono
-SELECT email INTO v_gameList FROM Jogo WHERE idJogo = p_idJogo;
-
--- Verifica se já se pode mexer na bd (jogo not runnig)
-SELECT estado INTO v_gameIsRunning FROM Jogo WHERE idJogo = p_idJogo;
-
-IF v_emailJogo IS NULL THEN
-        SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Error: Game does not exist.';
-ELSE
-        -- Obtém o tipo de usuário
-SELECT tipo INTO v_userType FROM Users WHERE email = v_requestEmail;
-
--- Verifica as permissões
-IF v_userType = 'admin' OR (v_userType = 'tester' AND v_requestEmail = v_emailJogo) THEN
-            IF !v_gameIsRunning THEN
-				-- Atualiza o jogo
-UPDATE Jogo
-SET
-    descricao = IFNULL(p_descricao, descricao),
-    jogador = IFNULL(p_jogador, jogador)
-    #scoreTotal = IFNULL(p_scoreTotal, scoreTotal),
-					#dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio)
-WHERE idJogo = p_idJogo;
-ELSE
-				SIGNAL SQLSTATE '45000'
-					SET MESSAGE_TEXT = 'Error: You can not change data in table Jogo while the game is runnig.';
-END IF;
-ELSE
-			SIGNAL SQLSTATE '45000'
-				SET MESSAGE_TEXT = 'Error: You do not have permission to modify this game.';
-END IF;
-END IF;
-END
-
-DELIMITER ;
 
 DELIMITER $$
 
@@ -384,39 +330,95 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Erro: Email não encontrado no sistema';
-ELSE
+    ELSE
          -- Verifica se o utilizador MySQL existe
         SET @sql_check_user = CONCAT('SELECT COUNT(*) INTO @user_count FROM mysql.user WHERE User = \'', v_username, '\' AND Host = \'%\'');
-PREPARE stmt_check FROM @sql_check_user;
-EXECUTE stmt_check;
-DEALLOCATE PREPARE stmt_check;
+        PREPARE stmt_check FROM @sql_check_user;
+        EXECUTE stmt_check;
+        DEALLOCATE PREPARE stmt_check;
 
 -- Se o utilizador MySQL existir, remove-o
-IF @user_count > 0 THEN
+        IF @user_count > 0 THEN
             -- Revoga todos os privilégios primeiro
             SET @sql_revoke = CONCAT('REVOKE ALL PRIVILEGES, GRANT OPTION FROM \'', v_username, '\'@\'%\'');
-PREPARE stmt_revoke FROM @sql_revoke;
-EXECUTE stmt_revoke;
-DEALLOCATE PREPARE stmt_revoke;
+            PREPARE stmt_revoke FROM @sql_revoke;
+            EXECUTE stmt_revoke;
+            DEALLOCATE PREPARE stmt_revoke;
 
--- Remove o utilizador
-SET @sql_drop_user = CONCAT('DROP USER \'', v_username, '\'@\'%\'');
-PREPARE stmt_drop FROM @sql_drop_user;
-EXECUTE stmt_drop;
-DEALLOCATE PREPARE stmt_drop;
+            -- Remove o utilizador
+            SET @sql_drop_user = CONCAT('DROP USER \'', v_username, '\'@\'%\'');
+            PREPARE stmt_drop FROM @sql_drop_user;
+            EXECUTE stmt_drop;
+            DEALLOCATE PREPARE stmt_drop;
 
 -- Atualiza privilégios
-FLUSH PRIVILEGES;
+            FLUSH PRIVILEGES;
 
-END IF;
+        END IF;
 
 		-- Remove da tabela Users
-DELETE FROM Users WHERE email = p_email;
+        DELETE FROM Users WHERE email = p_email;
 
-END IF;
-END
+    END IF;
+END$$
 
 DELIMITER;
+
+
+DELIMITER $$
+
+CREATE DEFINER=`root`@`%` PROCEDURE Alterar_jogo(
+	IN p_idJogo INT,
+    IN p_descricao TEXT,
+    IN p_jogador VARCHAR(100)
+    #IN p_scoreTotal INT,
+    #IN p_dataHorainicio DATETIME
+)
+BEGIN
+	DECLARE v_requestEmail VARCHAR(50);
+    DECLARE v_userType VARCHAR(20);
+    DECLARE v_gameIsRunning BOOLEAN; -- 0 (isRunnig) 1 (gameEnd)
+    DECLARE v_gameList VARCHAR(50);
+
+	-- Metodo para obter o email do usuário atual
+    SET v_requestEmail = CURRENT_USER();
+
+    -- Verifica se o jogo existe e obtém o proprietário do email do dono
+    SELECT email INTO v_gameList FROM Jogo WHERE idJogo = p_idJogo;
+
+-- Verifica se já se pode mexer na bd (jogo not runnig)
+    SELECT estado INTO v_gameIsRunning FROM Jogo WHERE idJogo = p_idJogo;
+
+    IF v_emailJogo IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: Game does not exist.';
+    ELSE
+        -- Obtém o tipo de usuário
+        SELECT tipo INTO v_userType FROM Users WHERE email = v_requestEmail;
+
+-- Verifica as permissões
+        IF v_userType = 'admin' OR (v_userType = 'tester' AND v_requestEmail = v_emailJogo) THEN
+            IF !v_gameIsRunning THEN
+				-- Atualiza o jogo
+                UPDATE Jogo
+                SET
+                    descricao = IFNULL(p_descricao, descricao),
+                    jogador = IFNULL(p_jogador, jogador)
+                    --#scoreTotal = IFNULL(p_scoreTotal, scoreTotal),
+                        --#dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio)
+                WHERE idJogo = p_idJogo;
+            ELSE
+				SIGNAL SQLSTATE '45000'
+					SET MESSAGE_TEXT = 'Error: You can not change data in table Jogo while the game is runnig.';
+            END IF;
+        ELSE
+			SIGNAL SQLSTATE '45000'
+				SET MESSAGE_TEXT = 'Error: You do not have permission to modify this game.';
+        END IF;
+    END IF;
+END
+
+DELIMITER ;
 
 CREATE ROLE IF NOT EXISTS "admin";	# administrador
 CREATE ROLE IF NOT EXISTS "player";	# jogador

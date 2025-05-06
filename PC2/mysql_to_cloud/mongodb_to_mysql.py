@@ -53,7 +53,7 @@ def initialize_game():
         if cursor.fetchone() is None:
             sql_user = """INSERT INTO Users (email, nome, telemovel, tipo, grupo)
                           VALUES (%s, %s, %s, %s, %s)"""
-            user_params = (USER_EMAIL, 'Default User', '000000000', 'player', 1)
+            user_params = (USER_EMAIL, 'Default User', '000000000', 'admin', 1)
             cursor.execute(sql_user, user_params)
             mysql_conn.commit()
             logger.info(f"Created user with email={USER_EMAIL}")
