@@ -21,6 +21,9 @@ SET time_zone = "+00:00";
 -- Database: `mydb`
 --
 
+CREATE ROLE IF NOT EXISTS 'admin';	# administrador
+CREATE ROLE IF NOT EXISTS 'player';	# jogador
+CREATE ROLE IF NOT EXISTS 'tester';	# tester
 -- --------------------------------------------------------
 
 --
@@ -251,7 +254,7 @@ DELIMITER ;
 
 DELIMITER $$
 
-CREATE DEFINER=`root`@`%` PROCEDURE Criar_utilizador(
+CREATE DEFINER='root'@'%' PROCEDURE Criar_utilizador(
     IN p_email VARCHAR(50),
     IN p_nome VARCHAR(100),
     IN p_telemovel VARCHAR(12),
@@ -315,7 +318,7 @@ DELIMITER ;
 
 DELIMITER $$
 
-CREATE DEFINER=`root`@`%` PROCEDURE `Remover_utilizador`(
+CREATE DEFINER='root'@'%' PROCEDURE `Remover_utilizador`(
 	IN p_email VARCHAR(50)
     )
 BEGIN
@@ -337,7 +340,7 @@ BEGIN
         EXECUTE stmt_check;
         DEALLOCATE PREPARE stmt_check;
 
--- Se o utilizador MySQL existir, remove-o
+        -- Se o utilizador MySQL existir, remove-o
         IF @user_count > 0 THEN
             -- Revoga todos os privilégios primeiro
             SET @sql_revoke = CONCAT('REVOKE ALL PRIVILEGES, GRANT OPTION FROM \'', v_username, '\'@\'%\'');
@@ -351,7 +354,7 @@ BEGIN
             EXECUTE stmt_drop;
             DEALLOCATE PREPARE stmt_drop;
 
--- Atualiza privilégios
+            -- Atualiza privilégios
             FLUSH PRIVILEGES;
 
         END IF;
@@ -367,12 +370,12 @@ DELIMITER;
 
 DELIMITER $$
 
-CREATE DEFINER=`root`@`%` PROCEDURE Alterar_jogo(
+CREATE DEFINER='root'@'%' PROCEDURE Alterar_jogo(
 	IN p_idJogo INT,
     IN p_descricao TEXT,
     IN p_jogador VARCHAR(100)
-    #IN p_scoreTotal INT,
-    #IN p_dataHorainicio DATETIME
+    --#IN p_scoreTotal INT,
+    --#IN p_dataHorainicio DATETIME
 )
 BEGIN
 	DECLARE v_requestEmail VARCHAR(50);
@@ -386,17 +389,18 @@ BEGIN
     -- Verifica se o jogo existe e obtém o proprietário do email do dono
     SELECT email INTO v_gameList FROM Jogo WHERE idJogo = p_idJogo;
 
--- Verifica se já se pode mexer na bd (jogo not runnig)
-    SELECT estado INTO v_gameIsRunning FROM Jogo WHERE idJogo = p_idJogo;
+
 
     IF v_emailJogo IS NULL THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Error: Game does not exist.';
     ELSE
+        -- Verifica se já se pode mexer na bd (jogo not runnig)
+        SELECT estado INTO v_gameIsRunning FROM Jogo WHERE idJogo = p_idJogo;
         -- Obtém o tipo de usuário
         SELECT tipo INTO v_userType FROM Users WHERE email = v_requestEmail;
 
--- Verifica as permissões
+        -- Verifica as permissões
         IF v_userType = 'admin' OR (v_userType = 'tester' AND v_requestEmail = v_emailJogo) THEN
             IF !v_gameIsRunning THEN
 				-- Atualiza o jogo
@@ -405,7 +409,7 @@ BEGIN
                     descricao = IFNULL(p_descricao, descricao),
                     jogador = IFNULL(p_jogador, jogador)
                     --#scoreTotal = IFNULL(p_scoreTotal, scoreTotal),
-                        --#dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio)
+                    --#dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio)
                 WHERE idJogo = p_idJogo;
             ELSE
 				SIGNAL SQLSTATE '45000'
@@ -416,13 +420,9 @@ BEGIN
 				SET MESSAGE_TEXT = 'Error: You do not have permission to modify this game.';
         END IF;
     END IF;
-END
+END$$
 
 DELIMITER ;
-
-CREATE ROLE IF NOT EXISTS "admin";	# administrador
-CREATE ROLE IF NOT EXISTS "player";	# jogador
-CREATE ROLE IF NOT EXISTS "tester";	# tester
 
 # - - administrador - -
 # TABLES
