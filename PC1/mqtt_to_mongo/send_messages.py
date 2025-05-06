@@ -93,22 +93,36 @@ def on_connect(client, userdata, flags, reason_code, properties=None):
 
 def on_message(client, userdata, msg):
     topic = msg.topic
+    logger.info(f"Received message on topic {topic}")
     try:
         ack_payload = json.loads(msg.payload.decode('utf-8'))
         message_id = ack_payload["_id"]
+        logger.debug(f"Processing acknowledgment for message ID {message_id}")
         collection = db["move_messages"] if topic == CONFIRMED_TOPICS["move_messages"] else db["sound_messages"]
-        result = collection.update_one(
-            {"_id": ObjectId(message_id), "processed": False},
-            {"$set": {"processed": True}}
-        )
-        if result.modified_count > 0:
-            logger.info(f"Marked message with _id {message_id} as processed")
+        try:
+            obj_id = ObjectId(message_id)
+        except errors.InvalidURI:
+            logger.error(f"Invalid ObjectId: {message_id}")
+            return
+        doc = collection.find_one({"_id": obj_id})
+        if doc:
+            if doc.get("processed") == False:
+                result = collection.update_one(
+                    {"_id": obj_id, "processed": False},
+                    {"$set": {"processed": True}}
+                )
+                if result.modified_count > 0:
+                    logger.info(f"Marked message with _id {message_id} as processed")
+                else:
+                    logger.warning(f"Failed to update message {message_id}, possibly already processed")
+            else:
+                logger.info(f"Message {message_id} already processed")
         else:
-            logger.warning(f"No message found with _id {message_id} or already processed")
+            logger.warning(f"No message found with _id {message_id}")
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse ack payload: {e}")
+        logger.error(f"Failed to parse ack payload: {e}, payload: {msg.payload}")
     except KeyError as e:
-        logger.error(f"Missing key in ack payload: {e}")
+        logger.error(f"Missing key in ack payload: {e}, payload: {ack_payload}")
     except errors.PyMongoError as e:
         logger.error(f"MongoDB error while processing ack: {e}")
 
@@ -131,14 +145,6 @@ def worker_publish(mqtt_client_instance, topic, message_queue):
             message_queue.task_done()
 
 def stream_mazemov():
-    """Purpose: Streams new mazemov messages from move_messages using MongoDB change streams.
-    Execution Flow:
-    1. Enter an infinite loop to continuously watch for changes.
-    2. Use move_messages_col.watch with a filter for inserts matching SESSION_ID and unprocessed status.
-    3. For each change, get the full document and check if it’s unprocessed.
-    4. If valid, queue it in move_queue and log at debug level.
-    5. On PyMongoError, log the error, fall back to polling unprocessed mazemov messages, and sleep POLL_INTERVAL.
-    6. On other exceptions, log and sleep 5 seconds before retrying."""
     move_messages_col = db["move_messages"]
     while True:
         try:
@@ -163,14 +169,6 @@ def stream_mazemov():
             time.sleep(5)
 
 def stream_mazesound():
-    """Purpose: Streams new mazesound messages from sound_messages using MongoDB change streams.
-    Execution Flow:
-    1. Enter an infinite loop to watch for changes.
-    2. Use sound_messages_col.watch with a filter for inserts matching SESSION_ID and unprocessed status.
-    3. For each change, get the full document and check if it’s unprocessed.
-    4. If valid, queue it in sound_queue and log at debug level.
-    5. On PyMongoError, log the error, fall back to polling unprocessed mazesound messages, and sleep POLL_INTERVAL.
-    6. On other exceptions, log and sleep 5 seconds before retrying."""
     sound_messages_col = db["sound_messages"]
     while True:
         try:
@@ -199,11 +197,8 @@ def main():
     mqtt_client = connect_to_mqtt()
     db = mongo_client[MONGO_DB]
 
-    # Start worker threads for publishing
     Thread(target=worker_publish, args=(mqtt_client, MQTT_TOPICS["move_messages"], move_queue), daemon=True).start()
     Thread(target=worker_publish, args=(mqtt_client, MQTT_TOPICS["sound_messages"], sound_queue), daemon=True).start()
-
-    # Start streaming threads
     Thread(target=stream_mazemov, daemon=True).start()
     Thread(target=stream_mazesound, daemon=True).start()
 

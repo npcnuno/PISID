@@ -10,13 +10,12 @@ services:
       MYSQL_USER: labuser
       MYSQL_PASSWORD: labpass
     volumes:
-      - mysql_data:/var/lib/mysql
       - ./initdb:/docker-entrypoint-initdb.d
     networks:
       - mysql-network
 
-  mongodb_to_mysql:
-    build: ./mongodb_to_mysql
+  mysql_to_cloud:
+    build: ./mysql_to_cloud
     depends_on:
       - mysql
     environment:
@@ -45,7 +44,6 @@ services:
     networks:
       - mysql-network
     restart: always
-
 
   # mongodb_to_mysql:
   #   build: ./mongodb_to_mysql
