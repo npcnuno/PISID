@@ -380,7 +380,7 @@ CREATE DEFINER='root'@'%' PROCEDURE Alterar_jogo(
 BEGIN
 	DECLARE v_requestEmail VARCHAR(50);
     DECLARE v_userType VARCHAR(20);
-    DECLARE v_gameIsRunning BOOLEAN; -- 0 (isRunnig) 1 (gameEnd)
+    DECLARE v_gameIsRunning BOOLEAN; -- 0 (isRunnig) 1 (jogo criado e ainda n começado e gameEnded)
     DECLARE v_gameList VARCHAR(50);
 
 	-- Metodo para obter o email do usuário atual
