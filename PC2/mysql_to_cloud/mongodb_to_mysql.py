@@ -49,11 +49,11 @@ def initialize_game():
             database=MYSQL_DATABASE
         )
         cursor = mysql_conn.cursor()
-        cursor.execute("SELECT email FROM User WHERE email = %s", (USER_EMAIL,))
+        cursor.execute("SELECT email FROM Users WHERE email = %s", (USER_EMAIL,))
         if cursor.fetchone() is None:
-            sql_user = """INSERT INTO User (email, nome, telemovel, tipo, grupo)
+            sql_user = """INSERT INTO Users (email, nome, telemovel, tipo, grupo)
                           VALUES (%s, %s, %s, %s, %s)"""
-            user_params = (USER_EMAIL, 'Default User', '000000000', 'use', 1)
+            user_params = (USER_EMAIL, 'Default User', '000000000', 'admin', 1)
             cursor.execute(sql_user, user_params)
             mysql_conn.commit()
             logger.info(f"Created user with email={USER_EMAIL}")
@@ -185,6 +185,8 @@ def worker_mazemov():
             marsami = payload["marsami"]
             status = payload["status"]
 
+            hora_evento = datetime.now()
+
             #NOTE:  insert the movement message
             sql = """INSERT INTO MedicaoPassagem (hora, salaOrigem, salaDestino, marsami, status, idJogo)
                      VALUES (NOW(), %s, %s, %s, %s, %s)"""
@@ -193,6 +195,9 @@ def worker_mazemov():
             mysql_conn.commit()
             last_inserted_id = cursor.lastrowid
             logger.info(f"Inserted movement message for player {payload['player']} with MySQL ID {last_inserted_id}")
+
+            validate_and_log_invalid_movement(marsami, origin_room, destination_room, hora_evento)
+
             #NOTE: Send acknowledgment
             ack_payload = {"_id": message_id, "mysqlID": last_inserted_id}
             mqtt_instance.publish(ack_topic, json.dumps(ack_payload), qos=MQTT_QOS)
@@ -265,6 +270,40 @@ def worker_mazesound():
             if cursor:
                 cursor.close()
             sound_queue.task_done()
+
+def validate_and_log_invalid_movement(marsami, sala_origem, sala_destino, hora_evento):
+    if (sala_origem, sala_destino) not in CORRIDOR_MAP:
+        try:
+            mysql_conn = mysql.connector.connect(
+                host=MYSQL_HOST,
+                user=MYSQL_USER,
+                password=MYSQL_PASSWORD,
+                database=MYSQL_DATABASE
+            )
+            cursor = mysql_conn.cursor()
+            mensagem = f"Movimento inválido de {sala_origem} para {sala_destino} pelo marsami {marsami}"
+            insert_sql = """
+            INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+            cursor.execute(insert_sql, (
+                hora_evento,  # hora real do evento
+                None,  # sensor não se aplica
+                None,  # leitura não se aplica
+                "MOVIMENTO",  # tipo de alerta
+                mensagem,  # texto da mensagem
+                datetime.now(),  # hora de escrita
+                GAME_ID  # id do jogo atual
+            ))
+            mysql_conn.commit()
+            logger.warning(f"Movimento inválido registado: {mensagem}")
+        except mysql.connector.Error as e:
+            logger.error(f"Erro ao inserir mensagem de erro: {e}")
+        finally:
+            if cursor:
+                cursor.close()
+            if mysql_conn:
+                mysql_conn.close()
 
 if __name__ == "__main__":
     time.sleep(10)
