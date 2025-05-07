@@ -148,10 +148,10 @@ ALTER TABLE `Users`
 --
 
 ALTER TABLE `Jogo`
-  MODIFY `idJogo` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+  MODIFY `idJogo` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 ALTER TABLE `MedicaoPassagem`
-  MODIFY `idMedicao` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+  MODIFY `idMedicao` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 ALTER TABLE `Mensagens`
   MODIFY `idMensagem` int(11) NOT NULL AUTO_INCREMENT;
@@ -179,6 +179,45 @@ ALTER TABLE `Sound`
   ADD CONSTRAINT `fk_Sound_Jogo` FOREIGN KEY (`idJogo`) REFERENCES `Jogo` (`idJogo`) ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 COMMIT;
+
+
+######################_TEST_DATA_######################
+
+
+-- Fill Users
+INSERT INTO Users (email, nome, telemovel, tipo, grupo) VALUES
+('alice@example.com', 'Alice Silva', '912345678', 'admin', 1),
+('bob@example.com', 'Bob Costa', '913456789', 'player', 2),
+('carla@example.com', 'Carla Dias', '914567890', 'tester', 3);
+
+-- Fill Jogo
+INSERT INTO Jogo (email, descricao, jogador, scoreTotal, dataHoraInicio) VALUES
+('bob@example.com', 'Jogo de teste do Bob', 'Bob Costa', 0, '2025-04-30 14:00:00'),
+('carla@example.com', 'Teste do labirinto', 'Carla Dias', 0, '2025-04-30 15:30:00');
+
+-- Fill MedicaoPassagem
+INSERT INTO MedicaoPassagem (hora, salaOrigem, salaDestino, marsami, status, idJogo) VALUES
+('2025-04-30 14:10:00', 1, 2, 101, 1, 1),
+('2025-04-30 14:12:00', 2, 3, 102, 1, 1),
+('2025-04-30 15:40:00', 1, 3, 201, 1, 2);
+
+-- Fill OcupacaoLabirinto (will be auto-filled by trigger, but we can also manually test it)
+INSERT INTO OcupacaoLabirinto (sala, numeroMarsamiOdd, numeroMarsamiEven, score, idJogo) VALUES
+(1, 1, 0, 5, 1),
+(2, 0, 1, 10, 1),
+(3, 0, 0, 3, 2);
+
+-- Fill Sound
+INSERT INTO Sound (hora, sound, idJogo) VALUES
+('2025-04-30 14:15:00', 19.50, 1),
+('2025-04-30 14:20:00', 23.10, 1),
+('2025-04-30 15:45:00', 22.30, 2);
+
+-- Fill Mensagens (should be filled automatically by trigger when sound > 21, but we can add test data too)
+INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo) VALUES
+('2025-04-30 14:21:00', NULL, 23.10, 'SOM', 'sound bigger than 21', '2025-04-30 14:21:00', 1),
+('2025-04-30 15:46:00', NULL, 22.30, 'SOM', 'sound bigger than 21', '2025-04-30 15:46:00', 2);
+
 
 -- Triggers
 
@@ -360,4 +399,10 @@ GRANT SELECT, UPDATE ON Users TO "tester";
 # GRANT EXECUTE ON PROCEDURE closeAllDoors TO "tester";
 # GRANT EXECUTE ON PROCEDURE getPoints TO "tester";
 # GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "tester";
+
+
+
+
+
+
 
