@@ -21,6 +21,9 @@ SET time_zone = "+00:00";
 -- Database: `mydb`
 --
 
+CREATE ROLE IF NOT EXISTS 'admin';	# administrador
+CREATE ROLE IF NOT EXISTS 'player';	# jogador
+CREATE ROLE IF NOT EXISTS 'tester';	# tester
 -- --------------------------------------------------------
 
 --
@@ -149,10 +152,10 @@ ALTER TABLE `Users`
 --
 
 ALTER TABLE `Jogo`
-  MODIFY `idJogo` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+  MODIFY `idJogo` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 ALTER TABLE `MedicaoPassagem`
-  MODIFY `idMedicao` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+  MODIFY `idMedicao` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 
 ALTER TABLE `Mensagens`
   MODIFY `idMensagem` int(11) NOT NULL AUTO_INCREMENT;
@@ -180,6 +183,45 @@ ALTER TABLE `Sound`
   ADD CONSTRAINT `fk_Sound_Jogo` FOREIGN KEY (`idJogo`) REFERENCES `Jogo` (`idJogo`) ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 COMMIT;
+
+
+######################_TEST_DATA_######################
+
+
+-- Fill Users
+INSERT INTO Users (email, nome, telemovel, tipo, grupo) VALUES
+('alice@example.com', 'Alice Silva', '912345678', 'admin', 1),
+('bob@example.com', 'Bob Costa', '913456789', 'player', 2),
+('carla@example.com', 'Carla Dias', '914567890', 'tester', 3);
+
+-- Fill Jogo
+INSERT INTO Jogo (email, descricao, jogador, scoreTotal, dataHoraInicio) VALUES
+('bob@example.com', 'Jogo de teste do Bob', 'Bob Costa', 0, '2025-04-30 14:00:00'),
+('carla@example.com', 'Teste do labirinto', 'Carla Dias', 0, '2025-04-30 15:30:00');
+
+-- Fill MedicaoPassagem
+INSERT INTO MedicaoPassagem (hora, salaOrigem, salaDestino, marsami, status, idJogo) VALUES
+('2025-04-30 14:10:00', 1, 2, 101, 1, 1),
+('2025-04-30 14:12:00', 2, 3, 102, 1, 1),
+('2025-04-30 15:40:00', 1, 3, 201, 1, 2);
+
+-- Fill OcupacaoLabirinto (will be auto-filled by trigger, but we can also manually test it)
+INSERT INTO OcupacaoLabirinto (sala, numeroMarsamiOdd, numeroMarsamiEven, score, idJogo) VALUES
+(1, 1, 0, 5, 1),
+(2, 0, 1, 10, 1),
+(3, 0, 0, 3, 2);
+
+-- Fill Sound
+INSERT INTO Sound (hora, sound, idJogo) VALUES
+('2025-04-30 14:15:00', 19.50, 1),
+('2025-04-30 14:20:00', 23.10, 1),
+('2025-04-30 15:45:00', 22.30, 2);
+
+-- Fill Mensagens (should be filled automatically by trigger when sound > 21, but we can add test data too)
+INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo) VALUES
+('2025-04-30 14:21:00', NULL, 23.10, 'SOM', 'sound bigger than 21', '2025-04-30 14:21:00', 1),
+('2025-04-30 15:46:00', NULL, 22.30, 'SOM', 'sound bigger than 21', '2025-04-30 15:46:00', 2);
+
 
 -- Triggers
 
@@ -251,7 +293,7 @@ DELIMITER ;
 
 DELIMITER $$
 
-CREATE DEFINER=`root`@`%` PROCEDURE Criar_utilizador(
+CREATE DEFINER='root'@'%' PROCEDURE Criar_utilizador(
     IN p_email VARCHAR(50),
     IN p_nome VARCHAR(100),
     IN p_telemovel VARCHAR(12),
@@ -312,64 +354,10 @@ END $$
 
 DELIMITER ;
 
-DELIMITER $$
-
-CREATE DEFINER=`root`@`%` PROCEDURE Alterar_jogo(
-	IN p_idJogo INT,
-    IN p_descricao TEXT,
-    IN p_jogador VARCHAR(100)
-    #IN p_scoreTotal INT,
-    #IN p_dataHorainicio DATETIME
-)
-BEGIN
-	DECLARE v_requestEmail VARCHAR(50);
-    DECLARE v_userType VARCHAR(20);
-    DECLARE v_gameIsRunning BOOLEAN; -- 0 (isRunnig) 1 (gameEnd)
-    DECLARE v_gameList VARCHAR(50);
-
-	-- Método para obter o email do usuário atual
-    SET v_requestEmail = CURRENT_USER();
-
-    -- Verifica se o jogo existe e obtém o proprietário do email do dono
-SELECT email INTO v_gameList FROM Jogo WHERE idJogo = p_idJogo;
-
--- Verifica se já se pode mexer na bd (jogo not runnig)
-SELECT estado INTO v_gameIsRunning FROM Jogo WHERE idJogo = p_idJogo;
-
-IF v_emailJogo IS NULL THEN
-        SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Error: Game does not exist.';
-ELSE
-        -- Obtém o tipo de usuário
-SELECT tipo INTO v_userType FROM Users WHERE email = v_requestEmail;
-
--- Verifica as permissões
-IF v_userType = 'admin' OR (v_userType = 'tester' AND v_requestEmail = v_emailJogo) THEN
-            IF !v_gameIsRunning THEN
-				-- Atualiza o jogo
-UPDATE Jogo
-SET
-    descricao = IFNULL(p_descricao, descricao),
-    jogador = IFNULL(p_jogador, jogador)
-    #scoreTotal = IFNULL(p_scoreTotal, scoreTotal),
-					#dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio)
-WHERE idJogo = p_idJogo;
-ELSE
-				SIGNAL SQLSTATE '45000'
-					SET MESSAGE_TEXT = 'Error: You can not change data in table Jogo while the game is runnig.';
-END IF;
-ELSE
-			SIGNAL SQLSTATE '45000'
-				SET MESSAGE_TEXT = 'Error: You do not have permission to modify this game.';
-END IF;
-END IF;
-END
-
-DELIMITER ;
 
 DELIMITER $$
 
-CREATE DEFINER=`root`@`%` PROCEDURE `Remover_utilizador`(
+CREATE DEFINER='root'@'%' PROCEDURE `Remover_utilizador`(
 	IN p_email VARCHAR(50)
     )
 BEGIN
@@ -384,43 +372,96 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Erro: Email não encontrado no sistema';
-ELSE
+    ELSE
          -- Verifica se o utilizador MySQL existe
         SET @sql_check_user = CONCAT('SELECT COUNT(*) INTO @user_count FROM mysql.user WHERE User = \'', v_username, '\' AND Host = \'%\'');
-PREPARE stmt_check FROM @sql_check_user;
-EXECUTE stmt_check;
-DEALLOCATE PREPARE stmt_check;
+        PREPARE stmt_check FROM @sql_check_user;
+        EXECUTE stmt_check;
+        DEALLOCATE PREPARE stmt_check;
 
--- Se o utilizador MySQL existir, remove-o
-IF @user_count > 0 THEN
+        -- Se o utilizador MySQL existir, remove-o
+        IF @user_count > 0 THEN
             -- Revoga todos os privilégios primeiro
             SET @sql_revoke = CONCAT('REVOKE ALL PRIVILEGES, GRANT OPTION FROM \'', v_username, '\'@\'%\'');
-PREPARE stmt_revoke FROM @sql_revoke;
-EXECUTE stmt_revoke;
-DEALLOCATE PREPARE stmt_revoke;
+            PREPARE stmt_revoke FROM @sql_revoke;
+            EXECUTE stmt_revoke;
+            DEALLOCATE PREPARE stmt_revoke;
 
--- Remove o utilizador
-SET @sql_drop_user = CONCAT('DROP USER \'', v_username, '\'@\'%\'');
-PREPARE stmt_drop FROM @sql_drop_user;
-EXECUTE stmt_drop;
-DEALLOCATE PREPARE stmt_drop;
+            -- Remove o utilizador
+            SET @sql_drop_user = CONCAT('DROP USER \'', v_username, '\'@\'%\'');
+            PREPARE stmt_drop FROM @sql_drop_user;
+            EXECUTE stmt_drop;
+            DEALLOCATE PREPARE stmt_drop;
 
--- Atualiza privilégios
-FLUSH PRIVILEGES;
+            -- Atualiza privilégios
+            FLUSH PRIVILEGES;
 
-END IF;
+        END IF;
 
 		-- Remove da tabela Users
-DELETE FROM Users WHERE email = p_email;
+        DELETE FROM Users WHERE email = p_email;
 
-END IF;
-END
+    END IF;
+END$$
 
 DELIMITER;
 
-CREATE ROLE IF NOT EXISTS "admin";	# administrador
-CREATE ROLE IF NOT EXISTS "player";	# jogador
-CREATE ROLE IF NOT EXISTS "tester";	# tester
+
+DELIMITER $$
+
+CREATE DEFINER='root'@'%' PROCEDURE Alterar_jogo(
+	IN p_idJogo INT,
+    IN p_descricao TEXT,
+    IN p_jogador VARCHAR(100)
+    --#IN p_scoreTotal INT,
+    --#IN p_dataHorainicio DATETIME
+)
+BEGIN
+	DECLARE v_requestEmail VARCHAR(50);
+    DECLARE v_userType VARCHAR(20);
+    DECLARE v_gameIsRunning BOOLEAN; -- 0 (isRunnig) 1 (jogo criado e ainda n começado e gameEnded)
+    DECLARE v_gameList VARCHAR(50);
+
+	-- Metodo para obter o email do usuário atual
+    SET v_requestEmail = CURRENT_USER();
+
+    -- Verifica se o jogo existe e obtém o proprietário do email do dono
+    SELECT email INTO v_gameList FROM Jogo WHERE idJogo = p_idJogo;
+
+
+
+    IF v_emailJogo IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: Game does not exist.';
+    ELSE
+        -- Verifica se já se pode mexer na bd (jogo not runnig)
+        SELECT estado INTO v_gameIsRunning FROM Jogo WHERE idJogo = p_idJogo;
+        -- Obtém o tipo de usuário
+        SELECT tipo INTO v_userType FROM Users WHERE email = v_requestEmail;
+
+        -- Verifica as permissões
+        IF v_userType = 'admin' OR (v_userType = 'tester' AND v_requestEmail = v_emailJogo) THEN
+            IF !v_gameIsRunning THEN
+				-- Atualiza o jogo
+                UPDATE Jogo
+                SET
+                    descricao = IFNULL(p_descricao, descricao),
+                    jogador = IFNULL(p_jogador, jogador)
+                    --#scoreTotal = IFNULL(p_scoreTotal, scoreTotal),
+                    --#dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio)
+                WHERE idJogo = p_idJogo;
+            ELSE
+				SIGNAL SQLSTATE '45000'
+					SET MESSAGE_TEXT = 'Error: You can not change data in table Jogo while the game is runnig.';
+            END IF;
+        ELSE
+			SIGNAL SQLSTATE '45000'
+				SET MESSAGE_TEXT = 'Error: You do not have permission to modify this game.';
+        END IF;
+    END IF;
+END$$
+
+DELIMITER ;
 
 # - - administrador - -
 # TABLES

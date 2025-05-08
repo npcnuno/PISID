@@ -1,0 +1,7 @@
+<h2>Login</h2>
+<form method="POST">
+  <input  name="email" required placeholder="Seu email">
+  <input type="password" name="password" required placeholder="Sua senha">
+  <button type="submit">Entrar</button>
+  {% if error %}<p style="color:red">{{ error }}</p>{% endif %}
+</form>

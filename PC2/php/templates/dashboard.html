@@ -1,0 +1,23 @@
+<h2>Bem-vindo {{ session.nome }}!</h2>
+
+<form method="POST">
+  <textarea name="descricao" required placeholder="Descrição do jogo"></textarea><br>
+  <button type="submit">Criar jogo</button>
+</form>
+
+<h3>Seus Jogos</h3>
+<ul>
+  {% for jogo in jogos %}
+    <li>
+      {{ jogo.descricao }} -
+      {% if not jogo.dataHoraInicio %}
+        <a href="/edit/{{ jogo.idJogo }}">Editar</a> |
+        <a href="/start/{{ jogo.idJogo }}">Iniciar</a>
+      {% else %}
+        <em>Iniciado</em>
+      {% endif %}
+    </li>
+  {% endfor %}
+</ul>
+
+<a href="/logout">Sair</a>
