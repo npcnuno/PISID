@@ -277,19 +277,6 @@ END$$
 
 DELIMITER ;
 
-DELIMITER $$
-
-CREATE TRIGGER `check_sound_threshold`
-AFTER INSERT ON `Sound`
-FOR EACH ROW
-BEGIN
-  IF NEW.sound > 21 THEN
-    INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-    VALUES (NOW(), NULL, NEW.sound, 'SOM', 'sound bigger than 21', NOW(), NEW.idJogo);
-  END IF;
-END$$
-
-DELIMITER ;
 
 DELIMITER $$
 
@@ -413,8 +400,8 @@ CREATE DEFINER='root'@'%' PROCEDURE Alterar_jogo(
 	IN p_idJogo INT,
     IN p_descricao TEXT,
     IN p_jogador VARCHAR(100)
-    --#IN p_scoreTotal INT,
-    --#IN p_dataHorainicio DATETIME
+    -- IN p_scoreTotal INT,
+    -- IN p_dataHorainicio DATETIME
 )
 BEGIN
 	DECLARE v_requestEmail VARCHAR(50);
@@ -447,8 +434,8 @@ BEGIN
                 SET
                     descricao = IFNULL(p_descricao, descricao),
                     jogador = IFNULL(p_jogador, jogador)
-                    --#scoreTotal = IFNULL(p_scoreTotal, scoreTotal),
-                    --#dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio)
+                    -- scoreTotal = IFNULL(p_scoreTotal, scoreTotal),
+                    -- dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio)
                 WHERE idJogo = p_idJogo;
             ELSE
 				SIGNAL SQLSTATE '45000'
@@ -476,7 +463,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON Users TO "admin";
 GRANT EXECUTE ON PROCEDURE Criar_utilizador TO "admin";
 #GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "admin";
 GRANT EXECUTE ON PROCEDURE Remover_utilizador TO "admin";
-GRANT EXECUTE ON PROCEDURE Criar_jogo TO "admin";
+-- GRANT EXECUTE ON PROCEDURE Criar_jogo TO "admin";
 GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "admin";
 # GRANT EXECUTE ON PROCEDURE Remover_jogo TO "admin";
 
@@ -511,5 +498,5 @@ GRANT SELECT, UPDATE ON Users TO "tester";
 # GRANT EXECUTE ON PROCEDURE closeAllDoors TO "tester";
 # GRANT EXECUTE ON PROCEDURE getPoints TO "tester";
 # GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "tester";
-GRANT EXECUTE ON PROCEDURE Criar_jogo TO "tester";
+-- GRANT EXECUTE ON PROCEDURE Criar_jogo TO "tester";
 GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "tester";

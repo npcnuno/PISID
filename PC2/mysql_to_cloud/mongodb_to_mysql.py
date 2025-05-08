@@ -244,6 +244,11 @@ def worker_mazesound():
             sound_level = float(payload["sound"])
             formatted_sound = f"{sound_level:.4f}"[:12]
 
+
+            hora_evento = datetime.now()
+
+            validate_and_log_invalid_sound(sound_level, hora_evento)
+
             #NOTE: insert the sound message
             sql = """INSERT INTO Sound (hora, sound, idJogo)
                      VALUES (FROM_UNIXTIME(%s), %s, %s)"""
@@ -297,6 +302,40 @@ def validate_and_log_invalid_movement(marsami, sala_origem, sala_destino, hora_e
             ))
             mysql_conn.commit()
             logger.warning(f"Movimento inválido registado: {mensagem}")
+        except mysql.connector.Error as e:
+            logger.error(f"Erro ao inserir mensagem de erro: {e}")
+        finally:
+            if cursor:
+                cursor.close()
+            if mysql_conn:
+                mysql_conn.close()
+
+def validate_and_log_invalid_sound(actual_sound, hora_evento):
+    if BASENOISE + TOLERABLENOISEVARIATION > actual_sound:
+        try:
+            mysql_conn = mysql.connector.connect(
+                host=MYSQL_HOST,
+                user=MYSQL_USER,
+                password=MYSQL_PASSWORD,
+                database=MYSQL_DATABASE
+            )
+            cursor = mysql_conn.cursor()
+            mensagem = f"Outlier de som com o valor de: {actual_sound}"
+            insert_sql = """
+            INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+            cursor.execute(insert_sql, (
+                hora_evento,  # hora real do evento
+                None,  # sensor não se aplica
+                None,  # leitura não se aplica
+                "SOM",  # tipo de alerta
+                mensagem,  # texto da mensagem
+                datetime.now(),  # hora de escrita
+                GAME_ID  # id do jogo atual
+            ))
+            mysql_conn.commit()
+            logger.warning(f"SOM: {mensagem}")
         except mysql.connector.Error as e:
             logger.error(f"Erro ao inserir mensagem de erro: {e}")
         finally:
