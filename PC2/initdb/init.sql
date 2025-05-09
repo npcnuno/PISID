@@ -245,7 +245,7 @@ DELIMITER ;
 DELIMITER $$
 
 CREATE TRIGGER `update_ocupacao_labirinto`
-AFTER INSERT ON `MedicaoPassagem`
+    AFTER INSERT ON `MedicaoPassagem`
 FOR EACH ROW
 BEGIN
   DECLARE odd BOOLEAN;

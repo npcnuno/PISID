@@ -30,13 +30,16 @@ class DecisionMaker:
         self.setup_lock = threading.Lock()
         self.abnormal_sound_handling = threading.Event()
         self.mov_event = threading.Event()
-        
+        self.game_started = False
+
+
         self._load_setup_variables()
         self._connect_mqtt_with_retry()
         
         self._send_close_all_doors()
-        for room in self.graph.rooms:
-            self._send_score(room)
+        self._initialize_graph_with_marsamis()
+        #for room in self.graph.rooms:
+            #self._send_score(room)
         time.sleep(0.2)
 
     def _connect_mqtt_with_retry(self, max_retries=5, retry_delay=5):
@@ -102,20 +105,24 @@ class DecisionMaker:
             self.marsami_tracking[marsami_id]['status'] = status
             if old_room != new_room:
                 self.marsami_tracking[marsami_id]['last_move_time'] = current_time
-        if self.check_all_marsami_initial():
+        if not self.game_started and self.check_all_marsami_initial():
+            self.game_started = True
             self.start_game()
         self.mov_event.set()
 
     def check_all_marsami_initial(self):
         with self.setup_lock:
-            return all(data['status'] == 0 for data in self.marsami_tracking.values())
+            return len(self.marsami_tracking) == 30 and all(data['status'] == 0 for data in self.marsami_tracking.values())
+
 
     def start_game(self):
+        logging.info("Iniciando o jogo após todos os 30 Marsamis estarem posicionados.")
         self._send_close_all_doors()
-        for room in self.graph.rooms:
-            if any(data['room'] == room and data['status'] == 1 for data in self.marsami_tracking.values()):
-                self._send_score(room)
+
+        self.check_scoring()
+
         self._send_open_all_doors()
+
 
     def monitor_sound(self):
         while self.running:
@@ -286,3 +293,27 @@ class DecisionMaker:
         if data['Type'] == 'mov':
             self.update_marsami_position(data['marsami_id'], data['new_room'], data['status'])
             self.mov_event.set()
+
+    def _initialize_graph_with_marsamis(self):
+        logging.info("Inicializando o grafo com contagem de Marsamis por sala...")
+        conn = self.cloud_pool.get_connection()
+        try:
+            with conn.cursor(dictionary=True) as cursor:
+                cursor.execute("""
+                    SELECT idSala, COUNT(*) AS total, SUM(idMarsami %% 2) AS odds
+                    FROM Marsamis
+                    GROUP BY idSala
+                """)
+                for row in cursor.fetchall():
+                    room_id = row["idSala"]
+                    total = int(row["total"])
+                    odds = int(row["odds"])
+                    evens = total - odds
+                    current = self.graph.get_room_state(room_id)
+                    self.graph.update_room(room_id, odds, evens, current["points"])
+                    logging.info(f"Sala {room_id}: {odds} ímpares, {evens} pares atualizados no grafo.")
+        except Exception as e:
+            logging.error(f"Erro ao inicializar o grafo com Marsamis: {e}")
+        finally:
+            conn.close()
+
