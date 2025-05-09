@@ -1,3 +1,4 @@
-paho-mqtt==2.1.0 
+flask
+paho-mqtt==2.1.0
 mysql-connector-python==9.3.0
 mysql-replication==1.0.9 
