@@ -358,6 +358,22 @@ DELIMITER ;
 
 DELIMITER $$
 
+CREATE DEFINER='root'@'%' PROCEDURE `Remover_jogo`(
+	IN p_id_jogo INT
+)
+BEGIN
+	IF (SELECT estado FROM Jogo WHERE idJogo = p_ID_Jogo) = 0 THEN
+		DELETE FROM Jogo WHERE idJogo = p_id_jogo;
+	ELSE
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Este jogo está a decorrer';
+	END IF;
+END $$
+
+DELIMITER ;
+
+
+DELIMITER $$
+
 CREATE DEFINER='root'@'%' PROCEDURE `Remover_utilizador`(
 	IN p_email VARCHAR(50)
     )
