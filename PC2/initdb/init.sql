@@ -564,11 +564,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON Users TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON Mensagens TO "admin";
 # STORED PROCEDURES
 GRANT EXECUTE ON PROCEDURE Criar_utilizador TO "admin";
-# GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "admin";
+GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "admin";
 GRANT EXECUTE ON PROCEDURE Remover_utilizador TO "admin";
 GRANT EXECUTE ON PROCEDURE Criar_jogo TO "admin";
 GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "admin";
-# GRANT EXECUTE ON PROCEDURE Remover_jogo TO "admin";
+GRANT EXECUTE ON PROCEDURE Remover_jogo TO "admin";
 
 # - - jogador - -
 # TABLES
@@ -580,9 +580,9 @@ GRANT SELECT, INSERT ON Sound TO "player";
 GRANT SELECT, UPDATE ON Users TO "player";
 GRANT SELECT, INSERT ON Mensagens TO "player";
 # STORED PROCEDURES
-# GRANT EXECUTE ON PROCEDURE startGame TO "player";
-# GRANT EXECUTE ON PROCEDURE getPoints TO "player";
-# GRANT EXECUTE ON PROCEDURE endGame TO "player";
+GRANT EXECUTE ON PROCEDURE startGame TO "player";
+GRANT EXECUTE ON PROCEDURE getPoints TO "player";
+GRANT EXECUTE ON PROCEDURE endGame TO "player";
 GRANT EXECUTE ON PROCEDURE Criar_jogo TO "player";
 GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "player";
 
@@ -596,8 +596,9 @@ GRANT SELECT ON Sound TO "tester";
 GRANT SELECT ON Mensagens TO "tester";
 GRANT SELECT, UPDATE ON Users TO "tester";
 # STORED PROCEDURES
-# GRANT EXECUTE ON PROCEDURE startGame TO "tester";
-# GRANT EXECUTE ON PROCEDURE getPoints TO "tester";
-# GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "tester";
+GRANT EXECUTE ON PROCEDURE endGame TO "tester";
+GRANT EXECUTE ON PROCEDURE startGame TO "tester";
+GRANT EXECUTE ON PROCEDURE getPoints TO "tester";
+GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "tester";
 GRANT EXECUTE ON PROCEDURE Criar_jogo TO "tester";
 GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "tester";
