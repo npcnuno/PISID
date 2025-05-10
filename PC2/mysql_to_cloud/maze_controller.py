@@ -6,7 +6,7 @@ import json
 import paho.mqtt.client as mqtt
 from mysql.connector import pooling, Error as MySQLError
 import logging
-from graph import Graph 
+from graph import Graph
 from database_manager import DatabaseManager
 from decision_maker import DecisionMaker
 from datetime import datetime,timedelta
@@ -57,22 +57,22 @@ class MazeController:
         self.sound_condition = threading.Condition()
         self.decision_condition = threading.Condition()
         self.decision_maker = DecisionMaker(
-            self.graph, 
-            self.sound_condition, 
-            self.current_sound, 
-            self.decision_condition, 
+            self.graph,
+            self.sound_condition,
+            self.current_sound,
+            self.decision_condition,
             self.PLAYER_ID,
             self.cloud_pool,
-            self.MQTT_BROKER_TO_SEND_COMMANDS, 
+            self.MQTT_BROKER_TO_SEND_COMMANDS,
             self.MQTT_TOPIC_TO_SEND_COMMANDS,
             self.event_delays
         )
         self.db_manager = DatabaseManager(
-            self.graph, 
-            self.PLAYER_ID, 
-            self.FRESH_START, 
-            self.cloud_pool, 
-            self.local_pool, 
+            self.graph,
+            self.PLAYER_ID,
+            self.FRESH_START,
+            self.cloud_pool,
+            self.local_pool,
             self.decision_maker,
             self.event_delays,
             self.event_delays_lock
@@ -116,6 +116,7 @@ class MazeController:
         except Exception as e:
             logger.error(f"Error connecting to MQTT broker: {e}")
             return
+
 
         threading.Thread(target=self.decision_maker.start, daemon=True).start()
         threading.Thread(target=self.movement_consumer, daemon=True).start()

@@ -143,6 +143,7 @@ class DecisionMaker:
                 logging.info(f"Locked room {room_id} after initial scoring")
         self._send_open_all_doors()
 
+
     def monitor_sound(self):
         while self.running:
             with self.sound_condition:
@@ -328,3 +329,27 @@ class DecisionMaker:
         if data['Type'] == 'mov':
             self.update_marsami_position(data['marsami_id'], data['new_room'], data['status'])
             self.mov_event.set()
+
+    def _initialize_graph_with_marsamis(self):
+        logging.info("Inicializando o grafo com contagem de Marsamis por sala...")
+        conn = self.cloud_pool.get_connection()
+        try:
+            with conn.cursor(dictionary=True) as cursor:
+                cursor.execute("""
+                    SELECT idSala, COUNT(*) AS total, SUM(idMarsami %% 2) AS odds
+                    FROM Marsamis
+                    GROUP BY idSala
+                """)
+                for row in cursor.fetchall():
+                    room_id = row["idSala"]
+                    total = int(row["total"])
+                    odds = int(row["odds"])
+                    evens = total - odds
+                    current = self.graph.get_room_state(room_id)
+                    self.graph.update_room(room_id, odds, evens, current["points"])
+                    logging.info(f"Sala {room_id}: {odds} ímpares, {evens} pares atualizados no grafo.")
+        except Exception as e:
+            logging.error(f"Erro ao inicializar o grafo com Marsamis: {e}")
+        finally:
+            conn.close()
+
