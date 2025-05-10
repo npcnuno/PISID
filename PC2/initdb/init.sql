@@ -383,25 +383,27 @@ BEGIN
 
         -- Se o utilizador MySQL existir, remove-o
         IF @user_count > 0 THEN
-            -- Revoga todos os privilégios primeiro
-            SET @sql_revoke = CONCAT('REVOKE ALL PRIVILEGES, GRANT OPTION FROM \'', v_username, '\'@\'%\'');
-            PREPARE stmt_revoke FROM @sql_revoke;
-            EXECUTE stmt_revoke;
-            DEALLOCATE PREPARE stmt_revoke;
+                    -- Revoga todos os privilégios primeiro
+                    SET @sql_revoke = CONCAT('REVOKE ALL PRIVILEGES, GRANT OPTION FROM \'', v_username, '\'@\'%\'');
+        PREPARE stmt_revoke FROM @sql_revoke;
+        EXECUTE stmt_revoke;
+        DEALLOCATE PREPARE stmt_revoke;
 
-            -- Remove o utilizador
-            SET @sql_drop_user = CONCAT('DROP USER \'', v_username, '\'@\'%\'');
-            PREPARE stmt_drop FROM @sql_drop_user;
-            EXECUTE stmt_drop;
-            DEALLOCATE PREPARE stmt_drop;
+        -- Remove o utilizador
+        SET @sql_drop_user = CONCAT('DROP USER \'', v_username, '\'@\'%\'');
+        PREPARE stmt_drop FROM @sql_drop_user;
+        EXECUTE stmt_drop;
+        DEALLOCATE PREPARE stmt_drop;
 
-            -- Atualiza privilégios
-            FLUSH PRIVILEGES;
+    -- Atualiza privilégios
+    FLUSH PRIVILEGES;
 
-        END IF;
+    END IF;
 
-		-- Remove da tabela Users
-        DELETE FROM Users WHERE email = p_email;
+        -- Desativa o utilizador na tabela Users ativo a FALSE
+    UPDATE Users
+        SET ativo = FALSE
+    WHERE email = p_email;
 
     END IF;
 END$$
