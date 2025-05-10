@@ -1,23 +1,123 @@
-<h2>Bem-vindo {{ session.nome }}!</h2>
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Painel do Usuário</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f4f6f9;
+      margin: 0;
+      padding: 20px;
+    }
 
-<form method="POST">
-  <textarea name="descricao" required placeholder="Descrição do jogo"></textarea><br>
-  <button type="submit">Criar jogo</button>
-</form>
+    .container {
+      max-width: 600px;
+      margin: 40px auto;
+      background-color: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      padding: 30px;
+    }
 
-<h3>Seus Jogos</h3>
-<ul>
-  {% for jogo in jogos %}
-    <li>
-      {{ jogo.descricao }} -
-      {% if not jogo.dataHoraInicio %}
-        <a href="/edit/{{ jogo.idJogo }}">Editar</a> |
-        <a href="/start/{{ jogo.idJogo }}">Iniciar</a>
-      {% else %}
-        <em>Iniciado</em>
-      {% endif %}
-    </li>
-  {% endfor %}
-</ul>
+    h2, h3 {
+      color: #333;
+    }
 
-<a href="/logout">Sair</a>
+    h2 {
+      margin-bottom: 20px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 100px;
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      resize: vertical;
+      margin-bottom: 15px;
+    }
+
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    ul {
+      list-style-type: none;
+      padding: 0;
+    }
+
+    li {
+      background-color: #f9f9f9;
+      padding: 12px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    a {
+      text-decoration: none;
+      color: #007BFF;
+      margin-left: 10px;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .logout {
+      display: inline-block;
+      margin-top: 20px;
+      color: #ff4d4f;
+      font-weight: bold;
+    }
+
+    em {
+      color: #777;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Bem-vindo {{ session.nome }}!</h2>
+
+    <form method="POST">
+      <textarea name="descricao" required placeholder="Descrição do jogo"></textarea><br>
+      <button type="submit">Criar jogo</button>
+    </form>
+
+    <h3>Seus Jogos</h3>
+    <ul>
+      {% for jogo in jogos %}
+        <li>
+          <span>{{ jogo.descricao }}</span>
+          <span>
+            {% if not jogo.dataHoraInicio %}
+              <a href="/edit/{{ jogo.idJogo }}">Editar</a> |
+              <a href="/start/{{ jogo.idJogo }}">Iniciar</a>
+            {% else %}
+              <em>Iniciado</em>
+            {% endif %}
+          </span>
+        </li>
+      {% endfor %}
+    </ul>
+
+    <a class="logout" href="/logout">Sair</a>
+  </div>
+</body>
+</html>
+

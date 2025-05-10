@@ -1,7 +1,85 @@
-<h2>Login</h2>
-<form method="POST">
-  <input  name="email" required placeholder="Seu email">
-  <input type="password" name="password" required placeholder="Sua senha">
-  <button type="submit">Entrar</button>
-  {% if error %}<p style="color:red">{{ error }}</p>{% endif %}
-</form>
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Login</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #eef1f5;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .login-container {
+      max-width: 400px;
+      margin: 80px auto;
+      background-color: #ffffff;
+      padding: 40px 30px;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    }
+
+    h2 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 30px;
+    }
+
+    form {
+      display: flex;
+      flex-direction: column;
+    }
+
+    input {
+      padding: 12px 15px;
+      margin-bottom: 20px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: #007BFF;
+      box-shadow: 0 0 4px rgba(0, 123, 255, 0.5);
+    }
+
+    button {
+      background-color: #007BFF;
+      color: #fff;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    .error-message {
+      color: #e74c3c;
+      font-size: 14px;
+      text-align: center;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <h2>Login</h2>
+    <form method="POST">
+      <input name="email" required placeholder="Seu email">
+      <input type="password" name="password" required placeholder="Sua senha">
+      <button type="submit">Entrar</button>
+      {% if error %}
+        <p class="error-message">{{ error }}</p>
+      {% endif %}
+    </form>
+  </div>
+</body>
+</html>
+

@@ -411,61 +411,6 @@ DELIMITER ;
 
 DELIMITER $$
 
-CREATE DEFINER='root'@'%' PROCEDURE Alterar_jogo(
-	IN p_idJogo INT,
-    IN p_descricao TEXT,
-    IN p_jogador VARCHAR(100)
-    -- IN p_scoreTotal INT,
-    -- IN p_dataHorainicio DATETIME
-)
-BEGIN
-	DECLARE v_requestEmail VARCHAR(50);
-    DECLARE v_userType VARCHAR(20);
-    DECLARE v_gameIsRunning BOOLEAN; -- 1 (isRunnig) 0 (jogo criado e ainda não começado e gameEnded)
-    DECLARE v_emailJogo VARCHAR(50);
-
-	-- Metodo para obter o email do usuário atual
-    SET v_requestEmail = CURRENT_USER();
-
-    -- Verifica se o jogo existe e obtém o proprietário do email do dono
-    SELECT email INTO v_emailJogo FROM Jogo WHERE idJogo = p_idJogo;
-
-    IF v_emailJogo IS NULL THEN
-        SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Error: Game does not exist.';
-    ELSE
-        -- Verifica se já se pode mexer na bd (jogo not runnig)
-        SELECT estado INTO v_gameIsRunning FROM Jogo WHERE idJogo = p_idJogo;
-        -- Obtém o tipo de usuário
-        SELECT tipo INTO v_userType FROM Users WHERE email = v_requestEmail;
-
-        -- Verifica as permissões
-        IF v_userType = 'admin' OR (v_userType = 'tester' AND v_requestEmail = v_emailJogo) THEN
-            IF !v_gameIsRunning THEN
-				-- Atualiza o jogo
-                UPDATE Jogo
-                SET
-                    descricao = IFNULL(p_descricao, descricao),
-                    jogador = IFNULL(p_jogador, jogador)
-                    -- scoreTotal = IFNULL(p_scoreTotal, scoreTotal),
-                    -- dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio)
-                WHERE idJogo = p_idJogo;
-            ELSE
-				SIGNAL SQLSTATE '45000'
-					SET MESSAGE_TEXT = 'Error: You can not change data in table Jogo while the game is runnig.';
-            END IF;
-        ELSE
-			SIGNAL SQLSTATE '45000'
-				SET MESSAGE_TEXT = 'Error: You do not have permission to modify this game.';
-        END IF;
-    END IF;
-END$$
-
-DELIMITER ;
-
-
-DELIMITER $$
-
 CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo`(
     IN p_idJogo INT,
     IN p_email VARCHAR(50), -- Email do usuário que está tentando modificar
@@ -560,8 +505,7 @@ ELSE
                 SET MESSAGE_TEXT = 'Erro: Permissão negada para modificar este jogo.';
 END IF;
 END IF;
-END
-
+END$$
 
 
 DELIMITER ;
