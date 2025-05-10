@@ -263,6 +263,9 @@ def worker_mazesound():
             sound_level = float(payload["Sound"])
             formatted_sound = f"{sound_level:.4f}"[:12]
 
+            validate_and_log_alert_sound(sound_level, timestamp)
+            validate_and_log_outlier_sound(sound_level, timestamp)
+
             sql = """INSERT INTO Sound (hora, sound, idJogo)
                      VALUES (FROM_UNIXTIME(%s), %s, %s)"""
             params = (timestamp, formatted_sound, game_id)
@@ -305,7 +308,7 @@ def validate_and_log_invalid_movement(marsami, sala_origem, sala_destino, hora_e
             mensagem = f"Movimento inválido de {sala_origem} para {sala_destino} pelo marsami {marsami}"
             insert_sql = """
             INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, NOW(), %s)
         """
             cursor.execute(insert_sql, (
                 hora_evento,  # hora real do evento
@@ -313,7 +316,6 @@ def validate_and_log_invalid_movement(marsami, sala_origem, sala_destino, hora_e
                 None,  # leitura não se aplica
                 "MOVIMENTO",  # tipo de alerta
                 mensagem,  # texto da mensagem
-                datetime.now(),  # hora de escrita
                 GAME_ID  # id do jogo atual
             ))
             mysql_conn.commit()
@@ -340,7 +342,7 @@ def validate_and_log_alert_sound(actual_sound, hora_evento):
             mensagem = f"Alerta de som com o valor de: {actual_sound}, prestes a antigir o limite!"
             insert_sql = """
             INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, NOW(), %s)
         """
             cursor.execute(insert_sql, (
                 hora_evento,  # hora real do evento
@@ -348,7 +350,6 @@ def validate_and_log_alert_sound(actual_sound, hora_evento):
                 None,  # leitura não se aplica
                 "SOM",  # tipo de alerta
                 mensagem,  # texto da mensagem
-                datetime.now(),  # hora de escrita
                 GAME_ID  # id do jogo atual
             ))
             mysql_conn.commit()
@@ -374,7 +375,7 @@ def validate_and_log_outlier_sound(actual_sound, hora_evento):
             mensagem = f"Outlier de som com o valor de: {actual_sound}"
             insert_sql = """
             INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, NOW(), %s)
         """
             cursor.execute(insert_sql, (
                 hora_evento,  # hora real do evento
@@ -382,7 +383,6 @@ def validate_and_log_outlier_sound(actual_sound, hora_evento):
                 None,  # leitura não se aplica
                 "SOM",  # tipo de alerta
                 mensagem,  # texto da mensagem
-                datetime.now(),  # hora de escrita
                 GAME_ID  # id do jogo atual
             ))
             mysql_conn.commit()

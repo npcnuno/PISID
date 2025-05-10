@@ -37,7 +37,7 @@ CREATE TABLE `Jogo` (
   `descricao` text DEFAULT NULL,
   `jogador` varchar(50) DEFAULT NULL,
   `scoreTotal` int(11) DEFAULT NULL,
-  `dataHoraInicio` varchar(45) DEFAULT NULL,
+  `dataHoraInicio` timestamp NULL DEFAULT NULL,
   `estado` boolean DEFAULT FALSE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -407,13 +407,13 @@ BEGIN
 	DECLARE v_requestEmail VARCHAR(50);
     DECLARE v_userType VARCHAR(20);
     DECLARE v_gameIsRunning BOOLEAN; -- 0 (isRunnig) 1 (jogo criado e ainda n começado e gameEnded)
-    DECLARE v_gameList VARCHAR(50);
+    DECLARE v_emailJogo VARCHAR(50);
 
 	-- Metodo para obter o email do usuário atual
     SET v_requestEmail = CURRENT_USER();
 
     -- Verifica se o jogo existe e obtém o proprietário do email do dono
-    SELECT email INTO v_gameList FROM Jogo WHERE idJogo = p_idJogo;
+    SELECT email INTO v_emailJogo FROM Jogo WHERE idJogo = p_idJogo;
 
 
 
@@ -450,6 +450,40 @@ END$$
 
 DELIMITER ;
 
+
+DELIMITER $$
+
+CREATE DEFINER='root'@'%' PROCEDURE Criar_jogo(
+    IN p_email VARCHAR(50),
+    IN p_descricao TEXT,
+    IN p_jogador VARCHAR(100),
+    IN p_dataHoraInicio DATETIME
+)
+BEGIN
+    DECLARE v_user_type SET('admin','player','tester');
+
+    -- Verifica se o utilizador existe
+    IF NOT EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Erro: Email não encontrado na tabela Users';
+    END IF;
+
+    -- Verifica o tipo de utilizador
+    SELECT tipo INTO v_user_type FROM Users WHERE email = p_email;
+
+    IF v_user_type NOT IN ('admin', 'tester') THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Erro: Apenas administradores ou testers podem criar jogos';
+    END IF;
+
+    -- Insere o novo jogo
+    INSERT INTO Jogo (email, descricao, jogador, scoreTotal, dataHoraInicio, estado)
+    VALUES (p_email, p_descricao, p_jogador, 0, p_dataHoraInicio, FALSE);
+END$$
+
+DELIMITER ;
+
+
 # - - administrador - -
 # TABLES
 -- Conceda acesso ao schema inteiro (substitua 'meu_schema' pelo nome correto)
@@ -463,7 +497,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON Users TO "admin";
 GRANT EXECUTE ON PROCEDURE Criar_utilizador TO "admin";
 #GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "admin";
 GRANT EXECUTE ON PROCEDURE Remover_utilizador TO "admin";
--- GRANT EXECUTE ON PROCEDURE Criar_jogo TO "admin";
+GRANT EXECUTE ON PROCEDURE Criar_jogo TO "admin";
 GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "admin";
 # GRANT EXECUTE ON PROCEDURE Remover_jogo TO "admin";
 
@@ -498,5 +532,5 @@ GRANT SELECT, UPDATE ON Users TO "tester";
 # GRANT EXECUTE ON PROCEDURE closeAllDoors TO "tester";
 # GRANT EXECUTE ON PROCEDURE getPoints TO "tester";
 # GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "tester";
--- GRANT EXECUTE ON PROCEDURE Criar_jogo TO "tester";
+GRANT EXECUTE ON PROCEDURE Criar_jogo TO "tester";
 GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "tester";
