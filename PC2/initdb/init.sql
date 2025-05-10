@@ -115,7 +115,8 @@ CREATE TABLE `Users` (
   `nome` varchar(100) DEFAULT NULL,
   `telemovel` varchar(12) DEFAULT NULL,
   `tipo` SET('admin','player','tester') DEFAULT NULL,
-  `grupo` int(11) DEFAULT NULL
+  `grupo` int(11) DEFAULT NULL,
+  'ativo' BOOLEAN DEFAULT '1'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
@@ -286,6 +287,7 @@ CREATE DEFINER='root'@'%' PROCEDURE Criar_utilizador(
     IN p_telemovel VARCHAR(12),
     IN p_tipo SET('admin','player','tester'),
     IN p_grupo INT,
+    IN p_ativo BOOLEAN,
     IN p_pass VARCHAR(100)
 )
 BEGIN
