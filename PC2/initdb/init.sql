@@ -116,7 +116,7 @@ CREATE TABLE `Users` (
   `telemovel` varchar(12) DEFAULT NULL,
   `tipo` SET('admin','player','tester') DEFAULT NULL,
   `grupo` int(11) DEFAULT NULL,
-  'ativo' BOOLEAN DEFAULT '1'
+  `ativo` BOOLEAN DEFAULT '1'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
