@@ -461,7 +461,6 @@ DELIMITER $$
 
 CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo`(
     IN p_idJogo INT,
-    IN p_email VARCHAR(50), -- Email do usuário que está tentando modificar
     IN p_descricao TEXT,
     IN p_jogador VARCHAR(100),
     IN p_scoreTotal INT,
@@ -475,84 +474,51 @@ BEGIN
     DECLARE v_oldEmail VARCHAR(50);
 
     -- Verifica se o jogo existe e obtém o proprietário e estado
-SELECT email, estado INTO v_emailJogo, v_gameIsRunning
-FROM Jogo WHERE idJogo = p_idJogo;
+    SELECT estado INTO v_gameIsRunning
+    FROM Jogo WHERE idJogo = p_idJogo;
 
-IF v_emailJogo IS NULL THEN
+    -- Obtém o tipo de usuário que está tentando modificar
+    SELECT tipo INTO v_userType FROM Users WHERE nome = SUBSTRING_INDEX(SESSION_USER(), '@', 1);
+
+    IF v_userType IS NULL THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Erro: Jogo não existe.';
-ELSE
-        -- Obtém o tipo de usuário que está tentando modificar
-SELECT tipo INTO v_userType FROM Users WHERE email = p_email;
+            SET MESSAGE_TEXT = 'Erro: Usuário não encontrado.';
 
-IF v_userType IS NULL THEN
-            SIGNAL SQLSTATE '45000'
-                SET MESSAGE_TEXT = 'Erro: Usuário não encontrado.';
+    -- Administrador pode alterar tudo
+    ELSEIF v_userType = 'admin' THEN
+    IF NOT v_gameIsRunning THEN
 
-        -- Administrador pode alterar tudo
-        ELSEIF v_userType = 'admin' THEN
-            IF NOT v_gameIsRunning THEN
-                -- Verifica se está tentando alterar o email
-                IF p_email IS NOT NULL AND p_email != v_emailJogo THEN
-                    -- Verifica se o novo email já existe na tabela Users
-                    IF EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
-                        SIGNAL SQLSTATE '45000'
-                            SET MESSAGE_TEXT = 'Erro: O novo email já existe na tabela Users.';
-ELSE
-                        SET v_oldEmail = v_emailJogo;
-                        -- Atualiza o email em todas as tabelas relacionadas
-UPDATE Jogo SET email = p_email WHERE idJogo = p_idJogo;
-UPDATE Sound SET Django = p_email WHERE Django = v_oldEmail;
-UPDATE Mensagens SET Django = p_email WHERE Django = v_oldEmail;
-UPDATE OcupacaoLabirinto SET Django = p_email WHERE Django = v_oldEmail;
-UPDATE MedicaoPassagem SET Django = p_email WHERE Django = v_oldEmail;
-END IF;
-END IF;
-
-UPDATE Jogo
-SET
-    descricao = IFNULL(p_descricao, descricao),
-    jogador = IFNULL(p_jogador, jogador),
-    scoreTotal = IFNULL(p_scoreTotal, scoreTotal),
-    dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio),
-    estado = IF(p_estado IS NULL, estado, p_estado)
-WHERE idJogo = p_idJogo;
-ELSE
+    UPDATE Jogo
+    SET
+        descricao = IFNULL(p_descricao, descricao),
+        jogador = IFNULL(p_jogador, jogador),
+        scoreTotal = IFNULL(p_scoreTotal, scoreTotal),
+        dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio),
+        estado = IF(p_estado IS NULL, estado, p_estado)
+    WHERE idJogo = p_idJogo;
+    ELSE
                 SIGNAL SQLSTATE '45000'
                     SET MESSAGE_TEXT = 'Erro: Jogo em execução não pode ser alterado.';
-END IF;
+    END IF;
 
-        -- Dono do jogo (player) pode alterar alguns campos
-        ELSEIF v_userType = 'player' AND p_email = v_emailJogo THEN
+        -- Dono do jogo (player ou tester) pode alterar alguns campos
+        ELSEIF v_userType = 'player' OR v_userType = 'Tester' THEN
+
             IF NOT v_gameIsRunning THEN
-UPDATE Jogo
-SET
-    descricao = IFNULL(p_descricao, descricao),
-    jogador = IFNULL(p_jogador, jogador),
-    scoreTotal = IFNULL(p_scoreTotal, scoreTotal)
-WHERE idJogo = p_idJogo;
-ELSE
+                UPDATE Jogo
+                    SET
+                        descricao = IFNULL(p_descricao, descricao),
+                        jogador = IFNULL(p_jogador, jogador)
+                    WHERE idJogo = p_idJogo;
+            ELSE
                 SIGNAL SQLSTATE '45000'
                     SET MESSAGE_TEXT = 'Erro: Jogo em execução não pode ser alterado.';
-END IF;
+            END IF;
 
-        -- Tester pode alterar apenas descrição e jogador (para qualquer jogo)
-        ELSEIF v_userType = 'tester' THEN
-            IF NOT v_gameIsRunning THEN
-UPDATE Jogo
-SET
-    descricao = IFNULL(p_descricao, descricao),
-    jogador = IFNULL(p_jogador, jogador)
-WHERE idJogo = p_idJogo;
-ELSE
-                SIGNAL SQLSTATE '45000'
-                    SET MESSAGE_TEXT = 'Erro: Jogo em execução não pode ser alterado.';
-END IF;
-ELSE
-            SIGNAL SQLSTATE '45000'
-                SET MESSAGE_TEXT = 'Erro: Permissão negada para modificar este jogo.';
-END IF;
-END IF;
+        ELSE
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Permissão negada para modificar este jogo.';
+    END IF;
 END$$
 
 
@@ -577,11 +543,6 @@ BEGIN
 
     -- Verifica o tipo de utilizador
     SELECT tipo INTO v_user_type FROM Users WHERE email = p_email;
-
-    IF v_user_type NOT IN ('admin', 'tester') THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Erro: Apenas administradores ou testers podem criar jogos';
-    END IF;
 
     -- Insere o novo jogo
     INSERT INTO Jogo (email, descricao, jogador, scoreTotal, dataHoraInicio, estado)
