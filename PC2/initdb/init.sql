@@ -487,7 +487,7 @@ DELIMITER ;
 # - - administrador - -
 # TABLES
 -- Conceda acesso ao schema inteiro (substitua 'meu_schema' pelo nome correto)
-GRANT SELECT, INSERT, UPDATE, DELETE ON mydb.* TO 'admin';
+GRANT SELECT, INSERT, UPDATE, DELETE ON mydb.* TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON Jogo TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON MedicaoPassagem TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON OcupacaoLabirinto TO "admin";
@@ -510,10 +510,7 @@ GRANT SELECT, INSERT, UPDATE ON OcupacaoLabirinto TO "player";
 GRANT SELECT, INSERT ON Sound TO "player";
 GRANT SELECT , UPDATE ON Users TO "player";
 # STORED PROCEDURES
-# GRANT EXECUTE ON PROCEDURE openDoor TO "player";
 # GRANT EXECUTE ON PROCEDURE startGame TO "player";
-# GRANT EXECUTE ON PROCEDURE closeDoor TO "player";
-# GRANT EXECUTE ON PROCEDURE closeAllDoors TO "player";
 # GRANT EXECUTE ON PROCEDURE getPoints TO "player";
 # GRANT EXECUTE ON PROCEDURE endGame TO "player";
 
@@ -526,10 +523,7 @@ GRANT SELECT ON OcupacaoLabirinto TO "tester";
 GRANT SELECT ON Sound TO "tester";
 GRANT SELECT, UPDATE ON Users TO "tester";
 # STORED PROCEDURES
-# GRANT EXECUTE ON PROCEDURE openDoor TO "tester";
 # GRANT EXECUTE ON PROCEDURE startGame TO "tester";
-# GRANT EXECUTE ON PROCEDURE closeDoor TO "tester";
-# GRANT EXECUTE ON PROCEDURE closeAllDoors TO "tester";
 # GRANT EXECUTE ON PROCEDURE getPoints TO "tester";
 # GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "tester";
 GRANT EXECUTE ON PROCEDURE Criar_jogo TO "tester";
