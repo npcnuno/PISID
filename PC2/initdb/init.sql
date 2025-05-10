@@ -493,6 +493,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON MedicaoPassagem TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON OcupacaoLabirinto TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON Sound TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON Users TO "admin";
+GRANT SELECT, INSERT, UPDATE, DELETE ON Mensagens TO "admin";
 # STORED PROCEDURES
 GRANT EXECUTE ON PROCEDURE Criar_utilizador TO "admin";
 #GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "admin";
@@ -508,15 +509,18 @@ GRANT SELECT, INSERT ON MedicaoPassagem TO "player";
 GRANT SELECT, INSERT ON Mensagens TO "player";
 GRANT SELECT, INSERT, UPDATE ON OcupacaoLabirinto TO "player";
 GRANT SELECT, INSERT ON Sound TO "player";
-GRANT SELECT , UPDATE ON Users TO "player";
+GRANT SELECT, UPDATE ON Users TO "player";
+GRANT SELECT, INSERT ON Mensagens TO "admin";
 # STORED PROCEDURES
 # GRANT EXECUTE ON PROCEDURE startGame TO "player";
 # GRANT EXECUTE ON PROCEDURE getPoints TO "player";
 # GRANT EXECUTE ON PROCEDURE endGame TO "player";
+GRANT EXECUTE ON PROCEDURE Criar_jogo TO "player";
+GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "player";
 
 # - - tester - -
 # TABLES
-GRANT SELECT, INSERT, UPDATE ON Jogo TO "tester";
+GRANT SELECT ON TO "tester";
 GRANT SELECT ON MedicaoPassagem TO "tester";
 GRANT SELECT ON Mensagens TO "tester";
 GRANT SELECT ON OcupacaoLabirinto TO "tester";
