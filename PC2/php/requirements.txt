@@ -1,4 +1,4 @@
-Flask
+flask
 SQLAlchemy
 PyMySQL
 cryptography

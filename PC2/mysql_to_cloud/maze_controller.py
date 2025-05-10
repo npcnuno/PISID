@@ -9,13 +9,11 @@ import logging
 from graph import Graph 
 from database_manager import DatabaseManager
 from decision_maker import DecisionMaker
-from flask import Flask, jsonify, render_template_string
 from datetime import datetime,timedelta
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
 
 class MazeController:
     def __init__(self):
@@ -87,57 +85,6 @@ class MazeController:
         self.sound_queue = queue.Queue()
         self.running = True
 
-        # Flask routes
-        @app.route('/')
-        def index():
-            return render_template_string('''
-                <!DOCTYPE html>
-                <html lang="en">
-                <head>
-                    <meta charset="UTF-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>Marsamis in Rooms</title>
-                    <style>
-                        .room { margin: 10px; padding: 10px; border: 1px solid #ccc; }
-                        .odds { color: red; }
-                        .evens { color: blue; }
-                    </style>
-                </head>
-                <body>
-                    <h1>Marsamis in Rooms</h1>
-                    <div id="rooms"></div>
-                    <script>
-                        function updateRooms() {
-                            fetch('/data')
-                                .then(response => response.json())
-                                .then(data => {
-                                    const roomsDiv = document.getElementById('rooms');
-                                    roomsDiv.innerHTML = '';
-                                    data.forEach(room => {
-                                        const roomDiv = document.createElement('div');
-                                        roomDiv.className = 'room';
-                                        roomDiv.innerHTML = `
-                                            <h2>Room ${room.id}</h2>
-                                            <p class="odds">Odds: ${room.odds}</p>
-                                            <p class="evens">Evens: ${room.evens}</p>
-                                        `;
-                                        roomsDiv.appendChild(roomDiv);
-                                    });
-                                });
-                        }
-                        setInterval(updateRooms, 1000);
-                        updateRooms();
-                    </script>
-                </body>
-                </html>
-            ''')
-
-        @app.route('/data')
-        def data():
-            with self.graph.lock:
-                room_states = {room_id: self.graph.get_room_state(room_id) for room_id in sorted(self.graph.rooms.keys())}
-            return jsonify([{'id': room_id, 'odds': state['odds'], 'evens': state['evens']} for room_id, state in room_states.items()])
-
     def get_db_config(self, prefix, default_config):
         config = default_config.copy()
         for key in config:
@@ -175,7 +122,6 @@ class MazeController:
         threading.Thread(target=self.sound_consumer, daemon=True).start()
 
         # Start Flask server in a separate thread
-        threading.Thread(target=lambda: app.run(host='0.0.0.0', port=5003), daemon=True).start()
 
         try:
             while self.running:
@@ -249,10 +195,12 @@ class MazeController:
                 cursor.execute("SELECT sound, hora FROM Sound WHERE idSound = %s LIMIT 1", (mysqlID,))
                 result = cursor.fetchone()
                 if result:
-                    current_time = datetime.now() + timedelta(minutes=60)
+                    current_time = datetime.now() + timedelta(minutes=60) 
                     event_time = result['hora']
                     delay = current_time - event_time
+                    logger.critical(delay)
                     delay = delay.total_seconds()
+                    
                     if delay > 0:
                         with self.event_delays_lock:
                             self.event_delays.append(delay)

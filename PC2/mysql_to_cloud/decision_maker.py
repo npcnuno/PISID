@@ -1,10 +1,10 @@
-import decimal
 import json
 import time
 import threading
 from collections import defaultdict
 import paho.mqtt.client as mqtt
 import logging
+from datetime import datetime, timezone  # Added for UTC handling
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -21,7 +21,7 @@ class DecisionMaker:
         self.command_broker = MQTT_BROKER_TO_SEND_COMMANDS
         self.command_topic = MQTT_TOPIC_TO_SEND_COMMANDS
         self.marsami_tracking = defaultdict(lambda: {'start_time': None, 'room': None, 'status': None, 'last_move_time': None})
-        self.score_attempts = defaultdict(int)  # Track scoring attempts per room
+        self.score_attempts = defaultdict(int)
         self.event_delays = event_delays
         self.event_thread = None
         self.sound_thread = None
@@ -30,14 +30,43 @@ class DecisionMaker:
         self.setup_lock = threading.Lock()
         self.abnormal_sound_handling = threading.Event()
         self.mov_event = threading.Event()
-        
+        self.game_started = False
+        self.numberofmarsamis = 0
+        self.room_locks = defaultdict(bool)
+
         self._load_setup_variables()
         self._connect_mqtt_with_retry()
         
         self._send_close_all_doors()
-        for room in self.graph.rooms:
-            self._send_score(room)
+        self._initialize_graph_with_marsamis()
         time.sleep(0.2)
+
+    def _load_setup_variables(self):
+        with self.setup_lock:
+            conn = self.cloud_pool.get_connection()
+            try:
+                with conn.cursor(dictionary=True) as cursor:
+                    cursor.execute("SELECT normalnoise, noisevartoleration, timemarsamilive, numbermarsamis FROM setupmaze LIMIT 1")
+                    result = cursor.fetchone()
+                    if result:
+                        self.normalnoise = result['normalnoise']
+                        self.noisevartoleration = result['noisevartoleration']
+                        self.timemarsamilive = result['timemarsamilive']
+                        self.numberofmarsamis = result['numbermarsamis']
+                    else:
+                        self.normalnoise = 50
+                        self.noisevartoleration = 10
+                        self.timemarsamilive = 300
+                        self.numberofmarsamis = 30
+                        logging.warning("No setup data found, using default values")
+            except Exception as e:
+                logging.error(f"Error loading setup variables: {e}")
+                self.normalnoise = 50
+                self.noisevartoleration = 10
+                self.timemarsamilive = 300
+                self.numberofmarsamis = 30
+            finally:
+                conn.close()
 
     def _connect_mqtt_with_retry(self, max_retries=5, retry_delay=5):
         for attempt in range(max_retries):
@@ -68,29 +97,8 @@ class DecisionMaker:
         self.mqtt.loop_stop()
         self.mqtt.disconnect()
 
-    def _load_setup_variables(self):
-        with self.setup_lock:
-            conn = self.cloud_pool.get_connection()
-            try:
-                with conn.cursor(dictionary=True) as cursor:
-                    cursor.execute("SELECT normalnoise, noisevartoleration, timemarsamilive FROM setupmaze LIMIT 1")
-                    result = cursor.fetchone()
-                    if result:
-                        self.normalnoise = result['normalnoise']
-                        self.noisevartoleration = result['noisevartoleration']
-                        self.timemarsamilive = result['timemarsamilive']
-                    else:
-                        self.normalnoise = 50
-                        self.noisevartoleration = 10
-                        self.timemarsamilive = 300
-                        logging.warning("No setup data found, using default values")
-            except Exception as e:
-                logging.error(f"Error loading setup variables: {e}")
-                self.normalnoise = 50
-                self.noisevartoleration = 10
-                self.timemarsamilive = 300
-            finally:
-                conn.close()
+    def _initialize_graph_with_marsamis(self):
+        pass  # Placeholder
 
     def update_marsami_position(self, marsami_id, new_room, status):
         current_time = time.time()
@@ -102,19 +110,37 @@ class DecisionMaker:
             self.marsami_tracking[marsami_id]['status'] = status
             if old_room != new_room:
                 self.marsami_tracking[marsami_id]['last_move_time'] = current_time
-        if self.check_all_marsami_initial():
+                # Check if new_room was locked and is now unbalanced
+                state = self.graph.get_room_state(new_room)
+                if self.room_locks[new_room] and state['odds'] != state['evens']:
+                    self.room_locks[new_room] = False
+                    logging.info(f"Unlocked room {new_room} due to imbalance")
+        if not self.game_started and self.check_all_marsami_initial():
+            self.game_started = True
             self.start_game()
         self.mov_event.set()
 
     def check_all_marsami_initial(self):
         with self.setup_lock:
-            return all(data['status'] == 0 for data in self.marsami_tracking.values())
-
+            return len(self.marsami_tracking) == self.numberofmarsamis
+    
     def start_game(self):
+        logging.info("Starting the game: all Marsamis are positioned.")
+        logging.info(f"Number of Marsamis: {len(self.marsami_tracking)} / {self.numberofmarsamis}")
         self._send_close_all_doors()
-        for room in self.graph.rooms:
-            if any(data['room'] == room and data['status'] == 1 for data in self.marsami_tracking.values()):
-                self._send_score(room)
+        time.sleep(4)
+        positive_delays = [d for d in self.event_delays if d >= 0]
+        D = max(positive_delays) if positive_delays else 2.0
+        logging.info(f"Waiting for {D} seconds before initial scoring")
+        time.sleep(D)
+        for room_id in self.graph.rooms:
+            state = self.graph.get_room_state(room_id)
+            if state['odds'] == state['evens'] and (state['odds'] > 0 or state['evens'] > 0):
+                logging.info(f"Initial scoring on room {room_id}: odds={state['odds']}, evens={state['evens']}")
+                self._send_score(room_id)
+                self.score_attempts[room_id] += 1
+                self.room_locks[room_id] = True
+                logging.info(f"Locked room {room_id} after initial scoring")
         self._send_open_all_doors()
 
     def monitor_sound(self):
@@ -131,32 +157,42 @@ class DecisionMaker:
                         self._handle_abnormal_sound()
 
     def check_scoring(self):
+        if not self.game_started:
+            return
         positive_delays = [d for d in self.event_delays if d >= 0]
         D = max(positive_delays) if positive_delays else 2.0
+        if D > 4.0:
+            D = 4.0
         logging.info(f"Checking scoring with D={D}")
         current_time = time.time()
         for room_id in self.graph.rooms:
             state = self.graph.get_room_state(room_id)
             logging.info(f"Room {room_id}: odds={state['odds']}, evens={state['evens']}, attempts={self.score_attempts[room_id]}")
-            # Room is balanced if odds == evens or both are 0
-            is_balanced = state['odds'] == state['evens'] or (state['odds'] == 0 and state['evens'] == 0)
+            is_balanced = state['odds'] == state['evens']
+            if not (state['odds'] > 0 and state['evens'] > 0):
+                is_balanced = False 
+            has_marsamis = state['odds'] + state['evens'] > 0
             if is_balanced and self.score_attempts[room_id] < 3:
-                if any(data['room'] == room_id and data['status'] == 1 for data in self.marsami_tracking.values()):
+                if not has_marsamis:
+                    logging.info(f"Skipping scoring room {room_id}: balanced with zero Marsamis")
+                else:
                     last_movement_time = self.graph.last_movement_time.get(room_id)
-                    if last_movement_time:
+                    if last_movement_time is None:
+                        logging.info(f"Scoring room {room_id}: no movement recorded")
+                        self._send_score(room_id)
+                        self.score_attempts[room_id] += 1
+                        self.room_locks[room_id] = True
+                        logging.info(f"Locked room {room_id} after scoring")
+                    else:
                         stability_time = current_time - last_movement_time.timestamp()
                         if stability_time > D:
                             logging.info(f"Scoring room {room_id}: stability_time={stability_time} > D={D}")
                             self._send_score(room_id)
                             self.score_attempts[room_id] += 1
+                            self.room_locks[room_id] = True
+                            logging.info(f"Locked room {room_id} after scoring")
                         else:
                             logging.info(f"Not scoring {room_id}: stability_time={stability_time} <= D={D}")
-                    else:
-                        logging.info(f"Scoring room {room_id}: no last movement time")
-                        self._send_score(room_id)
-                        self.score_attempts[room_id] += 1
-                else:
-                    logging.info(f"Not scoring {room_id}: no active marsamis")
             else:
                 if self.score_attempts[room_id] >= 3:
                     logging.info(f"Not scoring {room_id}: maximum attempts (3) reached")
@@ -196,20 +232,12 @@ class DecisionMaker:
         current_time = time.time()
         for marsami_id, data in list(self.marsami_tracking.items()):
             if data['start_time']:
-                # Check total lifetime
                 if current_time - data['start_time'] > self.timemarsamilive:
                     self._kill_marsami(marsami_id, current_time, "exceeded lifetime")
-                # Check moving time (time since last move)
                 if data['last_move_time']:
                     time_since_move = current_time - data['last_move_time']
                     if time_since_move > 200:
                         self._kill_marsami(marsami_id, current_time, "stationary for over 200 seconds")
-                # Check stationary time for active marsamis
-                if data['status'] == 1 and data['last_move_time']:
-                    time_stationary = current_time - data['last_move_time']
-                    if time_stationary > 200:
-                        self._kill_marsami(marsami_id, current_time, "stationary for over 200 seconds")
-                # If no movement recorded, assume moving since start
                 elif data['status'] == 1 and not data['last_move_time']:
                     time_moving = current_time - data['start_time']
                     if time_moving > 200:
@@ -226,6 +254,9 @@ class DecisionMaker:
                 else:
                     state['odds'] = max(0, state['odds'] - 1)
                 self.graph.update_room(room_id, state['odds'], state['evens'], state['points'])
+                if self.room_locks[room_id] and state['odds'] != state['evens']:
+                    self.room_locks[room_id] = False
+                    logging.info(f"Unlocked room {room_id} due to imbalance after Marsami death")
             del self.marsami_tracking[marsami_id]
             logging.info(f"Killed marsami {marsami_id} due to {reason}")
 
@@ -235,20 +266,31 @@ class DecisionMaker:
         desired_open_doors = set()
         rooms = list(self.graph.rooms.keys())
         for room_id in rooms:
+            if self.room_locks[room_id]:
+                continue
             state = self.graph.get_room_state(room_id)
             deficit = state['odds'] - state['evens']
             total_marsami = state['odds'] + state['evens']
             for neighbor in self.graph.adjacency.get(room_id, []):
+                if self.room_locks[neighbor]:
+                    continue
                 neighbor_state = self.graph.get_room_state(neighbor)
                 neighbor_deficit = neighbor_state['odds'] - neighbor_state['evens']
                 neighbor_total = neighbor_state['odds'] + neighbor_state['evens']
+                deficit_diff = abs(deficit - neighbor_deficit)
                 if (deficit > 0 and neighbor_deficit < 0) or (deficit < 0 and neighbor_deficit > 0) or \
                    (deficit != 0 and neighbor_deficit == 0) or (deficit == 0 and neighbor_deficit != 0) or \
-                   (total_marsami > 0 and neighbor_total < total_marsami):
+                   (total_marsami > 0 and neighbor_total < total_marsami and deficit_diff > 2):
                     door_key = (room_id, neighbor)
                     desired_open_doors.add(door_key)
         for door_key in self.graph.door_states:
             room1, room2 = door_key
+            if self.room_locks[room1] or self.room_locks[room2]:
+                current_state = self.graph.get_door_state(room1, room2)
+                if current_state:
+                    self._send_door_command(room1, room2, False)
+                    self.graph.set_door_state(room1, room2, False)
+                continue
             current_state = self.graph.get_door_state(room1, room2)
             if door_key in desired_open_doors:
                 if not current_state:

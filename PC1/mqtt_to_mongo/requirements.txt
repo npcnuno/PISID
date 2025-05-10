@@ -3,3 +3,4 @@ pymongo==4.10.1
 pydantic==2.10.6
 pytz==2025.1
 typing==3.7.4.3
+python-dateutil

@@ -3,7 +3,6 @@ import json
 import time
 import queue
 import logging
-import threading
 from threading import Thread
 import mysql.connector 
 from paho.mqtt import client as mqtt_client
@@ -35,7 +34,7 @@ BASENOISE = 0.0
 TOLERABLENOISEVARIATION = 0.0
 movement_queue = queue.Queue()
 sound_queue = queue.Queue()
-game_initialized_event = threading.Event()
+
 
 def initialize_game():
     """Initialize the game by creating a user and game entry in MySQL if they don't exist."""
@@ -50,41 +49,27 @@ def initialize_game():
             database=MYSQL_DATABASE
         )
         cursor = mysql_conn.cursor()
-        
-        # Get or create user and retrieve their ID
         cursor.execute("SELECT email FROM Users WHERE email = %s", (USER_EMAIL,))
-        result = cursor.fetchone()
-        if result is None:
+        if cursor.fetchone() is None:
             sql_user = """INSERT INTO Users (email, nome, telemovel, tipo, grupo)
                           VALUES (%s, %s, %s, %s, %s)"""
-            user_params = (USER_EMAIL, 'Default User', '000000000', 'player', 1)
+            user_params = (USER_EMAIL, 'Default User', '000000000', 'admin', 1)
             cursor.execute(sql_user, user_params)
             mysql_conn.commit()
-            user_id = cursor.lastrowid
-            logger.info(f"Created user with email={USER_EMAIL} and id={user_id}")
+            logger.info(f"Created user with email={USER_EMAIL}")
         else:
-            user_id = result[0]
-            logger.info(f"User with email={USER_EMAIL} already exists with id={user_id}")
-        
-        # Insert game using user_id as jogador
+            logger.info(f"User with email={USER_EMAIL} already exists")
         sql_game = """INSERT INTO Jogo (email, jogador, scoreTotal, dataHoraInicio)
                       VALUES (%s, %s, %s, NOW())"""
-        game_params = (USER_EMAIL, user_id, 0)
+        game_params = (USER_EMAIL, PLAYER_ID, 0)
         cursor.execute(sql_game, game_params)
         mysql_conn.commit()
         GAME_ID = cursor.lastrowid
-        
-        # Verify the game exists
-        cursor.execute("SELECT idJogo FROM Jogo WHERE idJogo = %s", (GAME_ID,))
-        if cursor.fetchone():
-            game_initialized_event.set()
-            logger.info(f"Game initialized with idJogo={GAME_ID}")
-        else:
-            logger.error(f"Failed to verify game insertion for idJogo={GAME_ID}")
+        logger.info(f"Created new game with idJogo={GAME_ID} for player {PLAYER_ID}")
     except mysql.connector.Error as e:
-        logger.error(f"Database error during game initialization: {e}")
+        logger.error(f"Database error: {e}")
     except Exception as e:
-        logger.error(f"Unexpected error during game initialization: {e}")
+        logger.error(f"Unexpected error: {e}")
     finally:
         if cursor:
             cursor.close()
@@ -177,7 +162,6 @@ def on_message(client, userdata, msg):
 
 def worker_mazemov():
     """Worker thread to process movement messages and insert them into MySQL."""
-    game_initialized_event.wait()
     mysql_conn = None
     ack_topic = f"{MOVEMENT_TOPIC_PREFIX}{PLAYER_ID}{CONFIRMED_SUFFIX}"
     while True:
@@ -203,6 +187,7 @@ def worker_mazemov():
 
             hora_evento = datetime.now()
 
+            #NOTE:  insert the movement message
             sql = """INSERT INTO MedicaoPassagem (hora, salaOrigem, salaDestino, marsami, status, idJogo)
                      VALUES (NOW(), %s, %s, %s, %s, %s)"""
             params = (origin_room, destination_room, marsami, status, game_id)
@@ -213,6 +198,7 @@ def worker_mazemov():
 
             validate_and_log_invalid_movement(marsami, origin_room, destination_room, hora_evento)
 
+            #NOTE: Send acknowledgment
             ack_payload = {"_id": message_id, "mysqlID": last_inserted_id}
             mqtt_instance.publish(ack_topic, json.dumps(ack_payload), qos=MQTT_QOS)
             logger.info(f"Sent ACK to {ack_topic} with _id {message_id} and mysqlID {last_inserted_id}")
@@ -222,10 +208,7 @@ def worker_mazemov():
         except ValueError as e:
             logger.error(f"Invalid value in movement payload: {e}")
         except mysql.connector.Error as e:
-            if e.errno == 1452:
-                logger.error(f"Foreign key constraint failed: idJogo={game_id} does not exist in Jogo table")
-            else:
-                logger.error(f"MySQL error in worker_mazemov: {e}")
+            logger.error(f"MySQL error in worker_mazemov: {e}")
             if mysql_conn:
                 mysql_conn.rollback()
         except Exception as e:
@@ -237,7 +220,6 @@ def worker_mazemov():
 
 def worker_mazesound():
     """Worker thread to process sound messages and insert them into MySQL."""
-    game_initialized_event.wait()
     mysql_conn = None
     ack_topic = f"{SOUND_TOPIC_PREFIX}{PLAYER_ID}{CONFIRMED_SUFFIX}"
     while True:
@@ -256,13 +238,13 @@ def worker_mazesound():
 
             message_id = payload["_id"]
             game_id = GAME_ID
-            
             timestamp_str = payload["hour"]
             timestamp_dt = datetime.fromisoformat(timestamp_str)
-            timestamp = timestamp_dt.timestamp()  # This will be in seconds since epoch
+            timestamp = timestamp_dt.timestamp()
             sound_level = float(payload["sound"])
             formatted_sound = f"{sound_level:.4f}"[:12]
 
+            #NOTE: insert the sound message
             sql = """INSERT INTO Sound (hora, sound, idJogo)
                      VALUES (FROM_UNIXTIME(%s), %s, %s)"""
             params = (timestamp, formatted_sound, game_id)
@@ -270,7 +252,7 @@ def worker_mazesound():
             mysql_conn.commit()
             last_inserted_id = cursor.lastrowid
             logger.info(f"Inserted sound message for player {payload['player']} with MySQL ID {last_inserted_id}")
-
+            #NOTE: Send acknowledgment
             ack_payload = {"_id": message_id, "mysqlID": last_inserted_id}
             mqtt_instance.publish(ack_topic, json.dumps(ack_payload), qos=MQTT_QOS)
             logger.info(f"Sent ACK to {ack_topic} with _id {message_id} and mysqlID {last_inserted_id}")
@@ -279,10 +261,7 @@ def worker_mazesound():
         except ValueError as e:
             logger.error(f"Invalid value in sound payload: {e}")
         except mysql.connector.Error as e:
-            if e.errno == 1452:
-                logger.error(f"Foreign key constraint failed: idJogo={game_id} does not exist in Jogo table")
-            else:
-                logger.error(f"MySQL error in worker_mazesound: {e}")
+            logger.error(f"MySQL error in worker_mazesound: {e}")
             if mysql_conn:
                 mysql_conn.rollback()
         except Exception as e:
@@ -306,15 +285,15 @@ def validate_and_log_invalid_movement(marsami, sala_origem, sala_destino, hora_e
             insert_sql = """
             INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """
+        """
             cursor.execute(insert_sql, (
-                hora_evento,
-                None,
-                None,
-                "MOVIMENTO",
-                mensagem,
-                datetime.now(),
-                GAME_ID
+                hora_evento,  # hora real do evento
+                None,  # sensor não se aplica
+                None,  # leitura não se aplica
+                "MOVIMENTO",  # tipo de alerta
+                mensagem,  # texto da mensagem
+                datetime.now(),  # hora de escrita
+                GAME_ID  # id do jogo atual
             ))
             mysql_conn.commit()
             logger.warning(f"Movimento inválido registado: {mensagem}")
