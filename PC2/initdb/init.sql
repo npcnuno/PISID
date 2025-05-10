@@ -299,58 +299,55 @@ BEGIN
     IF at_pos <= 1 THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Erro: Email inválido';
-    END IF;
+END IF;
 
-    -- Verifica se o email já existe
-    IF EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
+-- Verifica se o email já existe
+IF EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Erro: Email já está registado no sistema';
-    ELSE
-        -- Insere dados na tabela Users (SEM armazenar senha)
-        INSERT INTO Users (email, nome, telemovel, tipo, grupo)
-        VALUES (p_email, p_nome, p_telemovel, p_tipo, p_grupo);
+ELSE
+    -- Insere dados na tabela Users (SEM armazenar senha)
+    INSERT INTO Users (email, nome, telemovel, tipo, grupo, ativo)
+    VALUES (p_email, p_nome, p_telemovel, p_tipo, p_grupo, TRUE);
 
-        -- Cria o utilizador MySQL
+    -- Cria o utilizador MySQL
         SET @sql_create_user = CONCAT('CREATE USER \'', v_username, '\'@\'%\' IDENTIFIED BY \'', p_pass, '\'');
-        PREPARE stmt FROM @sql_create_user;
-        EXECUTE stmt;
-        DEALLOCATE PREPARE stmt;
+    PREPARE stmt FROM @sql_create_user;
+    EXECUTE stmt;
+    DEALLOCATE PREPARE stmt;
 
-        -- Concede role
-        SET @sql_grant = CONCAT('GRANT ', p_tipo, ' TO \'', v_username, '\'@\'%\'');
-        PREPARE grant_stmt FROM @sql_grant;
-        EXECUTE grant_stmt;
-        DEALLOCATE PREPARE grant_stmt;
+    -- Concede role
+    SET @sql_grant = CONCAT('GRANT ', p_tipo, ' TO \'', v_username, '\'@\'%\'');
+    PREPARE grant_stmt FROM @sql_grant;
+    EXECUTE grant_stmt;
+    DEALLOCATE PREPARE grant_stmt;
 
-        -- Define a role padrão
-        SET @sql_default_role = CONCAT('SET DEFAULT ROLE ', p_tipo, ' TO \'', v_username, '\'@\'%\'');
-        PREPARE role_stmt FROM @sql_default_role;
-        EXECUTE role_stmt;
-        DEALLOCATE PREPARE role_stmt;
+    -- Define a role padrão
+    SET @sql_default_role = CONCAT('SET DEFAULT ROLE ', p_tipo, ' TO \'', v_username, '\'@\'%\'');
+    PREPARE role_stmt FROM @sql_default_role;
+    EXECUTE role_stmt;
+    DEALLOCATE PREPARE role_stmt;
+    -- Concede acesso EXECUTE a todos os SPs no schema
+    SET @sql_sp_access = CONCAT('GRANT EXECUTE ON mydb.* TO \'', v_username, '\'@\'%\'');
+    PREPARE sp_stmt FROM @sql_sp_access;
+    EXECUTE sp_stmt;
+    DEALLOCATE PREPARE sp_stmt;
 
--- Concede acesso EXECUTE a todos os SPs no schema
-SET @sql_sp_access = CONCAT('GRANT EXECUTE ON mydb.* TO \'', v_username, '\'@\'%\'');
-PREPARE sp_stmt FROM @sql_sp_access;
-EXECUTE sp_stmt;
-DEALLOCATE PREPARE sp_stmt;
+    -- Concede acesso aos triggers (necessário para operações que disparam triggers)
+    SET @sql_trigger_access = CONCAT('GRANT TRIGGER ON mydb.* TO \'', v_username, '\'@\'%\'');
+    PREPARE trigger_stmt FROM @sql_trigger_access;
+    EXECUTE trigger_stmt;
+    DEALLOCATE PREPARE trigger_stmt;
 
--- Concede acesso aos triggers (necessário para operações que disparam triggers)
-SET @sql_trigger_access = CONCAT('GRANT TRIGGER ON mydb.* TO \'', v_username, '\'@\'%\'');
-PREPARE trigger_stmt FROM @sql_trigger_access;
-EXECUTE trigger_stmt;
-DEALLOCATE PREPARE trigger_stmt;
+    -- Concede SELECT nas tabelas necessárias para ver informações básicas
+    SET @sql_table_access = CONCAT('GRANT SELECT ON mydb.Users TO \'', v_username, '\'@\'%\'');
+    PREPARE table_stmt FROM @sql_table_access;
+    EXECUTE table_stmt;
+    DEALLOCATE PREPARE table_stmt;
 
--- Concede SELECT nas tabelas necessárias para ver informações básicas
-SET @sql_table_access = CONCAT('GRANT SELECT ON mydb.Users TO \'', v_username, '\'@\'%\'');
-PREPARE table_stmt FROM @sql_table_access;
-EXECUTE table_stmt;
-DEALLOCATE PREPARE table_stmt;
+    -- Atualiza privilégios
+    FLUSH PRIVILEGES;
 
--- Atualiza privilégios
-FLUSH PRIVILEGES;
-
-        -- Atualiza privilégios
-        FLUSH PRIVILEGES;
     END IF;
 END $$
 
