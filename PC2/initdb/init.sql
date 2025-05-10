@@ -328,11 +328,26 @@ BEGIN
         EXECUTE role_stmt;
         DEALLOCATE PREPARE role_stmt;
 
-        -- Concede privilégios em todos os schemas
-        SET @sql_all_schema_privileges = CONCAT('GRANT ALL PRIVILEGES ON *.* TO \'', v_username, '\'@\'%\' WITH GRANT OPTION');
-        PREPARE all_schema_stmt FROM @sql_all_schema_privileges;
-        EXECUTE all_schema_stmt;
-        DEALLOCATE PREPARE all_schema_stmt;
+-- Concede acesso EXECUTE a todos os SPs no schema
+SET @sql_sp_access = CONCAT('GRANT EXECUTE ON mydb.* TO \'', v_username, '\'@\'%\'');
+PREPARE sp_stmt FROM @sql_sp_access;
+EXECUTE sp_stmt;
+DEALLOCATE PREPARE sp_stmt;
+
+-- Concede acesso aos triggers (necessário para operações que disparam triggers)
+SET @sql_trigger_access = CONCAT('GRANT TRIGGER ON mydb.* TO \'', v_username, '\'@\'%\'');
+PREPARE trigger_stmt FROM @sql_trigger_access;
+EXECUTE trigger_stmt;
+DEALLOCATE PREPARE trigger_stmt;
+
+-- Concede SELECT nas tabelas necessárias para ver informações básicas
+SET @sql_table_access = CONCAT('GRANT SELECT ON mydb.Users TO \'', v_username, '\'@\'%\'');
+PREPARE table_stmt FROM @sql_table_access;
+EXECUTE table_stmt;
+DEALLOCATE PREPARE table_stmt;
+
+-- Atualiza privilégios
+FLUSH PRIVILEGES;
 
         -- Atualiza privilégios
         FLUSH PRIVILEGES;
@@ -406,7 +421,7 @@ CREATE DEFINER='root'@'%' PROCEDURE Alterar_jogo(
 BEGIN
 	DECLARE v_requestEmail VARCHAR(50);
     DECLARE v_userType VARCHAR(20);
-    DECLARE v_gameIsRunning BOOLEAN; -- 0 (isRunnig) 1 (jogo criado e ainda n começado e gameEnded)
+    DECLARE v_gameIsRunning BOOLEAN; -- 1 (isRunnig) 0 (jogo criado e ainda não começado e gameEnded)
     DECLARE v_emailJogo VARCHAR(50);
 
 	-- Metodo para obter o email do usuário atual
@@ -414,8 +429,6 @@ BEGIN
 
     -- Verifica se o jogo existe e obtém o proprietário do email do dono
     SELECT email INTO v_emailJogo FROM Jogo WHERE idJogo = p_idJogo;
-
-
 
     IF v_emailJogo IS NULL THEN
         SIGNAL SQLSTATE '45000'
@@ -453,6 +466,108 @@ DELIMITER ;
 
 DELIMITER $$
 
+CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo`(
+    IN p_idJogo INT,
+    IN p_email VARCHAR(50), -- Email do usuário que está tentando modificar
+    IN p_descricao TEXT,
+    IN p_jogador VARCHAR(100),
+    IN p_scoreTotal INT,
+    IN p_dataHoraInicio DATETIME,
+    IN p_estado TINYINT
+)
+BEGIN
+    DECLARE v_userType VARCHAR(10);
+    DECLARE v_gameIsRunning BOOLEAN;
+    DECLARE v_emailJogo VARCHAR(50);
+    DECLARE v_oldEmail VARCHAR(50);
+
+    -- Verifica se o jogo existe e obtém o proprietário e estado
+SELECT email, estado INTO v_emailJogo, v_gameIsRunning
+FROM Jogo WHERE idJogo = p_idJogo;
+
+IF v_emailJogo IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Jogo não existe.';
+ELSE
+        -- Obtém o tipo de usuário que está tentando modificar
+SELECT tipo INTO v_userType FROM Users WHERE email = p_email;
+
+IF v_userType IS NULL THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Erro: Usuário não encontrado.';
+
+        -- Administrador pode alterar tudo
+        ELSEIF v_userType = 'admin' THEN
+            IF NOT v_gameIsRunning THEN
+                -- Verifica se está tentando alterar o email
+                IF p_email IS NOT NULL AND p_email != v_emailJogo THEN
+                    -- Verifica se o novo email já existe na tabela Users
+                    IF EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
+                        SIGNAL SQLSTATE '45000'
+                            SET MESSAGE_TEXT = 'Erro: O novo email já existe na tabela Users.';
+ELSE
+                        SET v_oldEmail = v_emailJogo;
+                        -- Atualiza o email em todas as tabelas relacionadas
+UPDATE Jogo SET email = p_email WHERE idJogo = p_idJogo;
+UPDATE Sound SET Django = p_email WHERE Django = v_oldEmail;
+UPDATE Mensagens SET Django = p_email WHERE Django = v_oldEmail;
+UPDATE OcupacaoLabirinto SET Django = p_email WHERE Django = v_oldEmail;
+UPDATE MedicaoPassagem SET Django = p_email WHERE Django = v_oldEmail;
+END IF;
+END IF;
+
+UPDATE Jogo
+SET
+    descricao = IFNULL(p_descricao, descricao),
+    jogador = IFNULL(p_jogador, jogador),
+    scoreTotal = IFNULL(p_scoreTotal, scoreTotal),
+    dataHoraInicio = IFNULL(p_dataHoraInicio, dataHoraInicio),
+    estado = IF(p_estado IS NULL, estado, p_estado)
+WHERE idJogo = p_idJogo;
+ELSE
+                SIGNAL SQLSTATE '45000'
+                    SET MESSAGE_TEXT = 'Erro: Jogo em execução não pode ser alterado.';
+END IF;
+
+        -- Dono do jogo (player) pode alterar alguns campos
+        ELSEIF v_userType = 'player' AND p_email = v_emailJogo THEN
+            IF NOT v_gameIsRunning THEN
+UPDATE Jogo
+SET
+    descricao = IFNULL(p_descricao, descricao),
+    jogador = IFNULL(p_jogador, jogador),
+    scoreTotal = IFNULL(p_scoreTotal, scoreTotal)
+WHERE idJogo = p_idJogo;
+ELSE
+                SIGNAL SQLSTATE '45000'
+                    SET MESSAGE_TEXT = 'Erro: Jogo em execução não pode ser alterado.';
+END IF;
+
+        -- Tester pode alterar apenas descrição e jogador (para qualquer jogo)
+        ELSEIF v_userType = 'tester' THEN
+            IF NOT v_gameIsRunning THEN
+UPDATE Jogo
+SET
+    descricao = IFNULL(p_descricao, descricao),
+    jogador = IFNULL(p_jogador, jogador)
+WHERE idJogo = p_idJogo;
+ELSE
+                SIGNAL SQLSTATE '45000'
+                    SET MESSAGE_TEXT = 'Erro: Jogo em execução não pode ser alterado.';
+END IF;
+ELSE
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Erro: Permissão negada para modificar este jogo.';
+END IF;
+END IF;
+END
+
+
+
+DELIMITER ;
+
+DELIMITER $$
+
 CREATE DEFINER='root'@'%' PROCEDURE Criar_jogo(
     IN p_email VARCHAR(50),
     IN p_descricao TEXT,
@@ -487,7 +602,7 @@ DELIMITER ;
 # - - administrador - -
 # TABLES
 -- Conceda acesso ao schema inteiro (substitua 'meu_schema' pelo nome correto)
-GRANT SELECT, INSERT, UPDATE, DELETE ON mydb.* TO "admin";
+GRANT SELECT, INSERT, UPDATE, DELETE ON mydb.* TO 'admin';
 GRANT SELECT, INSERT, UPDATE, DELETE ON Jogo TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON MedicaoPassagem TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON OcupacaoLabirinto TO "admin";
@@ -496,7 +611,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON Users TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON Mensagens TO "admin";
 # STORED PROCEDURES
 GRANT EXECUTE ON PROCEDURE Criar_utilizador TO "admin";
-#GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "admin";
+# GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "admin";
 GRANT EXECUTE ON PROCEDURE Remover_utilizador TO "admin";
 GRANT EXECUTE ON PROCEDURE Criar_jogo TO "admin";
 GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "admin";
@@ -510,7 +625,7 @@ GRANT SELECT, INSERT ON Mensagens TO "player";
 GRANT SELECT, INSERT, UPDATE ON OcupacaoLabirinto TO "player";
 GRANT SELECT, INSERT ON Sound TO "player";
 GRANT SELECT, UPDATE ON Users TO "player";
-GRANT SELECT, INSERT ON Mensagens TO "admin";
+GRANT SELECT, INSERT ON Mensagens TO "player";
 # STORED PROCEDURES
 # GRANT EXECUTE ON PROCEDURE startGame TO "player";
 # GRANT EXECUTE ON PROCEDURE getPoints TO "player";
@@ -520,11 +635,12 @@ GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "player";
 
 # - - tester - -
 # TABLES
-GRANT SELECT ON TO "tester";
+GRANT SELECT ON Jogo TO "tester";
 GRANT SELECT ON MedicaoPassagem TO "tester";
 GRANT SELECT ON Mensagens TO "tester";
 GRANT SELECT ON OcupacaoLabirinto TO "tester";
 GRANT SELECT ON Sound TO "tester";
+GRANT SELECT ON Mensagens TO "tester";
 GRANT SELECT, UPDATE ON Users TO "tester";
 # STORED PROCEDURES
 # GRANT EXECUTE ON PROCEDURE startGame TO "tester";
