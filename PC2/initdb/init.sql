@@ -473,9 +473,6 @@ BEGIN
             
         END IF;
     END IF;
-    
-    select concat("User atual depois de mudar: ", v_new_user);
-    select concat("User atual antes de mudar: ", v_old_username);
 
 	IF p_pass IS NOT NULL THEN
         SET @sql_default_role = CONCAT('ALTER USER \'', v_new_user, '\'@\'%\' IDENTIFIED BY \'', p_Pass, '\'');
