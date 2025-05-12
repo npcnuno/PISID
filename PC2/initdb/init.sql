@@ -286,7 +286,6 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
     IN p_telemovel VARCHAR(12),
     IN p_tipo SET('admin','player','tester'),
     IN p_grupo INT,
-    IN p_ativo BOOLEAN,
     IN p_pass VARCHAR(100)
 )
   BEGIN
@@ -521,8 +520,67 @@ BEGIN
     END IF;
 END$$
 
+DELIMITER ;
+
+
+DELIMITER $$
+    CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo_tester_player`(
+    IN p_idJogo INT,
+    IN p_descricao TEXT
+)
+BEGIN
+    DECLARE v_userType VARCHAR(10);
+    DECLARE v_gameIsRunning BOOLEAN;
+    DECLARE v_userEmail VARCHAR(255);
+    DECLARE v_jogoEmail VARCHAR(255);
+
+    -- Obtém o email do usuário atual (parte antes do @)
+    SET v_userEmail = CONCAT(SUBSTRING_INDEX(USER(), '@', 1), '%');
+
+    -- Verifica se o jogo existe e obtém o estado e email do proprietário
+    SELECT estado, email INTO v_gameIsRunning, v_jogoEmail
+    FROM Jogo WHERE idJogo = p_idJogo;
+
+    -- Verifica se o jogo existe
+    IF v_jogoEmail IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Jogo não encontrado.';
+    END IF;
+
+    -- Obtém o tipo de usuário que está tentando modificar
+    SELECT tipo INTO v_userType
+    FROM Users
+    WHERE email LIKE v_userEmail;
+
+    -- Verifica se o usuário existe e é tester ou player
+    IF v_userType IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Usuário não encontrado.';
+    ELSEIF v_userType NOT IN ('tester', 'player') THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Apenas testers e players podem alterar jogos.';
+    END IF;
+
+    -- Verifica se o usuário é o dono do jogo
+    IF NOT EXISTS (SELECT 1 FROM Users WHERE email LIKE v_userEmail AND email = v_jogoEmail) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Você só pode alterar seus próprios jogos.';
+    END IF;
+
+    -- Verifica se o jogo está em execução
+    IF v_gameIsRunning THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Jogo em execução não pode ser alterado.';
+    END IF;
+
+    -- Atualiza a descrição do jogo
+    UPDATE Jogo
+    SET descricao = IFNULL(p_descricao, descricao)
+    WHERE idJogo = p_idJogo;
+END$$
 
 DELIMITER ;
+
 
 DELIMITER $$
 
@@ -588,7 +646,7 @@ BEGIN
 
     -- Verifica se o usuário tem permissão para criar jogos
     IF v_user_type NOT IN ('admin', 'player', 'tester') THEN
-            SIGNAL SQLSTATE '45000'
+        SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Erro: Usuário não tem permissão para criar jogos';
     END IF;
 
