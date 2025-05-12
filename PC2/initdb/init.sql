@@ -289,7 +289,7 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
     IN p_pass VARCHAR(100)
 )
   BEGIN
-    DECLARE v_username VARCHAR(40);
+	DECLARE v_username VARCHAR(40);
     DECLARE at_pos INT;
 
     -- Extrai o username do email
@@ -298,22 +298,22 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
 
     IF at_pos <= 1 THEN
         SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Erro: Email inválido';
-END IF;
+            SET MESSAGE_TEXT = 'Erro: Email inválido';
+    END IF;
 
--- Verifica se o email já existe
-IF EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
-UPDATE Users
-SET nome = p_nome,
-    telemovel = p_telemovel,
-    tipo = p_tipo,
-    grupo = p_grupo,
-    ativo = TRUE
-WHERE email = p_email;
-ELSE
-    -- Insere dados na tabela Users (SEM armazenar senha)
-    INSERT INTO Users (email, nome, telemovel, tipo, grupo, ativo)
-    VALUES (p_email, p_nome, p_telemovel, p_tipo, p_grupo, TRUE);
+    -- Verifica se o email já existe
+    IF EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
+    UPDATE Users
+    SET nome = p_nome,
+        telemovel = p_telemovel,
+        tipo = p_tipo,
+        grupo = p_grupo,
+        ativo = TRUE
+    WHERE email = p_email;
+    ELSE
+        -- Insere dados na tabela Users (SEM armazenar senha)
+        INSERT INTO Users (email, nome, telemovel, tipo, grupo, ativo)
+        VALUES (p_email, p_nome, p_telemovel, p_tipo, p_grupo, TRUE);
 
     -- Cria o utilizador MySQL
     SET @sql_create_user = CONCAT('CREATE USER \'', v_username, '\'@\'%\' IDENTIFIED BY \'', p_pass, '\'');
@@ -345,15 +345,26 @@ ELSE
     EXECUTE trigger_stmt;
     DEALLOCATE PREPARE trigger_stmt;
 
-    -- Concede SELECT nas tabelas necessárias
-    SET @sql_table_access = CONCAT('GRANT SELECT ON mydb.Users TO \'', v_username, '\'@\'%\'');
-    PREPARE table_stmt FROM @sql_table_access;
-    EXECUTE table_stmt;
-    DEALLOCATE PREPARE table_stmt;
+
+    -- Remove o acesso geral às tabelas e concede acesso apenas às views específicas
+    IF p_tipo = 'player' THEN
+        SET @sql_view_access = CONCAT('GRANT SELECT ON mydb.vw_player_dados TO \'', v_username, '\'@\'%\'');
+    ELSEIF p_tipo = 'tester' THEN
+        SET @sql_view_access = CONCAT('GRANT SELECT ON mydb.vw_tester_dados TO \'', v_username, '\'@\'%\'');
+    ELSE
+        -- Admins mantêm acesso completo
+        SET @sql_view_access = CONCAT('GRANT SELECT ON mydb.* TO \'', v_username, '\'@\'%\'');
+    END IF;
+
+    PREPARE view_stmt FROM @sql_view_access;
+    EXECUTE view_stmt;
+    DEALLOCATE PREPARE view_stmt;
 
     -- Atualiza privilégios
     FLUSH PRIVILEGES;
+
     END IF;
+
 END $$
 
 DELIMITER ;
@@ -529,7 +540,7 @@ DELIMITER ;
 
 DELIMITER $$
 
-CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo`(
+CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo_admin`(
     IN p_idJogo INT,
     IN p_descricao TEXT,
     IN p_jogador VARCHAR(100),
@@ -591,12 +602,71 @@ BEGIN
     END IF;
 END$$
 
+DELIMITER ;
+
+
+DELIMITER $$
+    CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo`(
+    IN p_idJogo INT,
+    IN p_descricao TEXT
+)
+BEGIN
+    DECLARE v_userType VARCHAR(10);
+    DECLARE v_gameIsRunning BOOLEAN;
+    DECLARE v_userEmail VARCHAR(255);
+    DECLARE v_jogoEmail VARCHAR(255);
+
+    -- Obtém o email do usuário atual (parte antes do @)
+    SET v_userEmail = CONCAT(SUBSTRING_INDEX(USER(), '@', 1), '%');
+
+    -- Verifica se o jogo existe e obtém o estado e email do proprietário
+    SELECT estado, email INTO v_gameIsRunning, v_jogoEmail
+    FROM Jogo WHERE idJogo = p_idJogo;
+
+    -- Verifica se o jogo existe
+    IF v_jogoEmail IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Jogo não encontrado.';
+    END IF;
+
+    -- Obtém o tipo de usuário que está tentando modificar
+    SELECT tipo INTO v_userType
+    FROM Users
+    WHERE email LIKE v_userEmail;
+
+    -- Verifica se o usuário existe e é tester ou player
+    IF v_userType IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Usuário não encontrado.';
+    ELSEIF v_userType NOT IN ('tester', 'player') THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Apenas testers e players podem alterar jogos.';
+    END IF;
+
+    -- Verifica se o usuário é o dono do jogo
+    IF NOT EXISTS (SELECT 1 FROM Users WHERE email LIKE v_userEmail AND email = v_jogoEmail) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Você só pode alterar seus próprios jogos.';
+    END IF;
+
+    -- Verifica se o jogo está em execução
+    IF v_gameIsRunning THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Jogo em execução não pode ser alterado.';
+    END IF;
+
+    -- Atualiza a descrição do jogo
+    UPDATE Jogo
+    SET descricao = IFNULL(p_descricao, descricao)
+    WHERE idJogo = p_idJogo;
+END$$
 
 DELIMITER ;
 
+
 DELIMITER $$
 
-CREATE DEFINER='root'@'%' PROCEDURE Criar_jogo(
+CREATE DEFINER='root'@'%' PROCEDURE Criar_jogo_admin(
     IN p_email VARCHAR(50),
     IN p_descricao TEXT,
     IN p_jogador VARCHAR(100),
@@ -621,6 +691,54 @@ END$$
 
 DELIMITER ;
 
+
+DELIMITER $$
+
+CREATE DEFINER=`root`@`%` PROCEDURE `Criar_jogo`(
+    IN p_descricao TEXT
+)
+BEGIN
+    DECLARE v_user_type VARCHAR(20);
+    DECLARE v_email VARCHAR(255);
+    DECLARE v_username VARCHAR(50);
+    DECLARE user_count INT;
+
+    -- Obtém apenas o nome do usuário (parte antes do @)
+    SET v_username = SUBSTRING_INDEX(USER(), '@', 1);
+
+    -- Conta quantos usuários começam com este username (independente do domínio)
+    SELECT COUNT(*) INTO user_count FROM Users
+    WHERE email LIKE CONCAT(v_username, '@%');
+
+    -- Verifica se encontrou exatamente um usuário
+    IF user_count = 0 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Nenhum usuário encontrado com este nome';
+    ELSEIF user_count > 1 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Múltiplos usuários encontrados com este nome';
+    END IF;
+
+    -- Obtém o email completo do usuário
+    SELECT email INTO v_email FROM Users
+    WHERE email LIKE CONCAT(v_username, '@%') LIMIT 1;
+
+    -- Obtém o tipo de utilizador
+    SELECT tipo INTO v_user_type FROM Users WHERE email = v_email;
+
+    -- Verifica se o usuário tem permissão para criar jogos
+    IF v_user_type NOT IN ('admin', 'player', 'tester') THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Usuário não tem permissão para criar jogos';
+    END IF;
+
+        -- Insere o novo jogo
+    INSERT INTO Jogo (email, descricao, jogador, scoreTotal, dataHoraInicio, estado)
+    VALUES (v_email, p_descricao, NULL, 0, NULL, FALSE);
+
+END$$
+
+DELIMITER ;
 
 # - - administrador - -
 # TABLES
