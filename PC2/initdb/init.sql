@@ -459,7 +459,7 @@ DELIMITER ;
 
 DELIMITER $$
 
-CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo`(
+CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo_admin`(
     IN p_idJogo INT,
     IN p_descricao TEXT,
     IN p_jogador VARCHAR(100),
