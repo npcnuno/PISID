@@ -20,7 +20,7 @@ MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'password')
 MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'mydb')
 MQTT_BROKER = os.getenv('MQTT_BROKER', 'test.mosquitto.org')
 MQTT_PORT = int(os.getenv('MQTT_PORT', '1883'))
-PLAYER_ID = os.getenv('PLAYER_ID', '33')
+PLAYER_ID = os.getenv('PLAYER_ID', '36')
 MQTT_QOS = int(os.getenv('MQTT_QOS', '2'))
 MOVEMENT_TOPIC_PREFIX = os.getenv('MOVEMENT_TOPIC_PREFIX', 'pisid_mazemov_')
 SOUND_TOPIC_PREFIX = os.getenv('SOUND_TOPIC_PREFIX', 'pisid_mazesound_')
@@ -28,6 +28,7 @@ PROCESSED_SUFFIX = os.getenv('PROCESSED_SUFFIX', '_processed')
 CONFIRMED_SUFFIX = os.getenv('CONFIRMED_SUFFIX', '_confirmed')
 GAME_ID = int(os.getenv('GAME_ID', '1'))
 USER_EMAIL = os.getenv('USER_EMAIL', 'default@user.com')
+SOUND_ALERT_TOLARANCE = int(os.getenv("SOUND_ALERT_TOLARANCE", "1"))
 
 # Global variables
 CORRIDOR_MAP = {}
@@ -259,7 +260,8 @@ def worker_mazesound():
             
             timestamp_str = payload["Hour"]
             timestamp_dt = datetime.fromisoformat(timestamp_str)
-            timestamp = timestamp_dt.timestamp()  # This will be in seconds since epoch
+            timestamp = timestamp_dt.timestamp()  
+            
             sound_level = float(payload["Sound"])
             formatted_sound = f"{sound_level:.4f}"[:12]
 
@@ -308,7 +310,7 @@ def validate_and_log_invalid_movement(marsami, sala_origem, sala_destino, hora_e
             mensagem = f"Movimento inválido de {sala_origem} para {sala_destino} pelo marsami {marsami}"
             insert_sql = """
             INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-            VALUES (%s, %s, %s, %s, %s, NOW(), %s)
+            VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, NFROM_UNIXTIME(NOW()), %s)
         """
             cursor.execute(insert_sql, (
                 hora_evento,  # hora real do evento
@@ -330,7 +332,7 @@ def validate_and_log_invalid_movement(marsami, sala_origem, sala_destino, hora_e
 
 
 def validate_and_log_alert_sound(actual_sound, hora_evento):
-    if actual_sound > BASENOISE + TOLERABLENOISEVARIATION - 1:
+    if actual_sound > BASENOISE + TOLERABLENOISEVARIATION - SOUND_ALERT_TOLARANCE:
         try:
             mysql_conn = mysql.connector.connect(
                 host=MYSQL_HOST,
@@ -342,7 +344,7 @@ def validate_and_log_alert_sound(actual_sound, hora_evento):
             mensagem = f"Alerta de som com o valor de: {actual_sound}, prestes a antigir o limite!"
             insert_sql = """
             INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-            VALUES (%s, %s, %s, %s, %s, NOW(), %s)
+            VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, FROM_UNIXTIME(NOW()), %s)
         """
             cursor.execute(insert_sql, (
                 hora_evento,  # hora real do evento
@@ -375,7 +377,7 @@ def validate_and_log_outlier_sound(actual_sound, hora_evento):
             mensagem = f"Outlier de som com o valor de: {actual_sound}"
             insert_sql = """
             INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-            VALUES (%s, %s, %s, %s, %s, NOW(), %s)
+            VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, NFROM_UNIXTIME(NOW()), %s)
         """
             cursor.execute(insert_sql, (
                 hora_evento,  # hora real do evento
