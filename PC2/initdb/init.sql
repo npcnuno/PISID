@@ -36,7 +36,7 @@ CREATE TABLE `Jogo` (
   `email` varchar(50) DEFAULT NULL,
   `descricao` text DEFAULT NULL,
   `jogador` varchar(50) DEFAULT NULL,
-  `scoreTotal` int(11) DEFAULT NULL,
+  `scoreTotal` float(11, 1) DEFAULT NULL,
   `dataHoraInicio` timestamp NULL DEFAULT NULL,
   `estado` boolean DEFAULT FALSE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -87,7 +87,7 @@ CREATE TABLE `OcupacaoLabirinto` (
   `sala` int(11) NOT NULL,
   `numeroMarsamiOdd` int(11) NOT NULL DEFAULT 0,
   `numeroMarsamiEven` int(11) NOT NULL DEFAULT 0,
-  `score` int(11) DEFAULT NULL,
+  `score` float(11, 1) DEFAULT NULL,
   `idJogo` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -199,30 +199,6 @@ INSERT INTO Users (email, nome, telemovel, tipo, grupo) VALUES
 INSERT INTO Jogo (email, descricao, jogador, scoreTotal, dataHoraInicio) VALUES
 ('bob@example.com', 'Jogo de teste do Bob', 'Bob Costa', 0, '2025-04-30 14:00:00'),
 ('carla@example.com', 'Teste do labirinto', 'Carla Dias', 0, '2025-04-30 15:30:00');
-
--- Fill MedicaoPassagem
-INSERT INTO MedicaoPassagem (hora, salaOrigem, salaDestino, marsami, status, idJogo) VALUES
-('2025-04-30 14:10:00', 1, 2, 101, 1, 1),
-('2025-04-30 14:12:00', 2, 3, 102, 1, 1),
-('2025-04-30 15:40:00', 1, 3, 201, 1, 2);
-
--- Fill OcupacaoLabirinto (will be auto-filled by trigger, but we can also manually test it)
-INSERT INTO OcupacaoLabirinto (sala, numeroMarsamiOdd, numeroMarsamiEven, score, idJogo) VALUES
-(1, 1, 0, 5, 1),
-(2, 0, 1, 10, 1),
-(3, 0, 0, 3, 2);
-
--- Fill Sound
-INSERT INTO Sound (hora, sound, idJogo) VALUES
-('2025-04-30 14:15:00', 19.50, 1),
-('2025-04-30 14:20:00', 23.10, 1),
-('2025-04-30 15:45:00', 22.30, 2);
-
--- Fill Mensagens (should be filled automatically by trigger when sound > 21, but we can add test data too)
-INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo) VALUES
-('2025-04-30 14:21:00', NULL, 23.10, 'SOM', 'sound bigger than 21', '2025-04-30 14:21:00', 1),
-('2025-04-30 15:46:00', NULL, 22.30, 'SOM', 'sound bigger than 21', '2025-04-30 15:46:00', 2);
-
 
 -- Triggers
 
@@ -541,7 +517,7 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo_admin`(
     IN p_idJogo INT,
     IN p_descricao TEXT,
     IN p_jogador VARCHAR(100),
-    IN p_scoreTotal INT,
+    IN p_scoreTotal float(11, 1),
     IN p_dataHoraInicio DATETIME,
     IN p_estado TINYINT
 )
