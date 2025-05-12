@@ -558,21 +558,43 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_jogo`(
     IN p_descricao TEXT
 )
 BEGIN
-    DECLARE v_user_type ENUM('tester','player');
+    DECLARE v_user_type VARCHAR(20);
     DECLARE v_email VARCHAR(255);
+    DECLARE v_username VARCHAR(50);
+    DECLARE user_count INT;
 
-    -- Obtém o email do usuário atual
-    SET v_email = SUBSTRING_INDEX(USER(), '@', 1);
+    -- Obtém apenas o nome do usuário (parte antes do @)
+    SET v_username = SUBSTRING_INDEX(USER(), '@', 1);
 
-    -- Verifica se o utilizador existe
-    IF NOT EXISTS (SELECT 1 FROM Users WHERE email = v_email) THEN
+    -- Conta quantos usuários começam com este username (independente do domínio)
+    SELECT COUNT(*) INTO user_count FROM Users
+    WHERE email LIKE CONCAT(v_username, '@%');
+
+    -- Verifica se encontrou exatamente um usuário
+    IF user_count = 0 THEN
         SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Erro: Email não encontrado na tabela Users';
+            SET MESSAGE_TEXT = 'Erro: Nenhum usuário encontrado com este nome';
+    ELSEIF user_count > 1 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Múltiplos usuários encontrados com este nome';
     END IF;
 
-    -- Insere o novo jogo
+    -- Obtém o email completo do usuário
+    SELECT email INTO v_email FROM Users
+    WHERE email LIKE CONCAT(v_username, '@%') LIMIT 1;
+
+    -- Obtém o tipo de utilizador
+    SELECT tipo INTO v_user_type FROM Users WHERE email = v_email;
+
+    -- Verifica se o usuário tem permissão para criar jogos
+    IF v_user_type NOT IN ('admin', 'player', 'tester') THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Usuário não tem permissão para criar jogos';
+    END IF;
+
+        -- Insere o novo jogo
     INSERT INTO Jogo (email, descricao, jogador, scoreTotal, dataHoraInicio, estado)
-    VALUES (v_email, p_descricao, NULL, 0, NOW(), FALSE);
+    VALUES (v_email, p_descricao, NULL, 0, NULL, FALSE);
 
 END$$
 
