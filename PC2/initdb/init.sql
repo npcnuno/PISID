@@ -347,7 +347,7 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
     DEALLOCATE PREPARE trigger_stmt;
 
     -- Concede SELECT nas tabelas necessárias
-    SET @sql_table_access = CONCAT('GRANT SELECT ON mydb.Users TO \'', v_username, '\'@\'%\'');
+    SET @sql_table_access = CONCAT('GRANT SELECT ON mydb.* TO \'', v_username, '\'@\'%\'');
     PREPARE table_stmt FROM @sql_table_access;
     EXECUTE table_stmt;
     DEALLOCATE PREPARE table_stmt;
