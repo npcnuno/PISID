@@ -26,7 +26,9 @@ MONGO_URI = os.getenv('MONGO_URI', (
     f"connectTimeoutMS=5000&socketTimeoutMS=5000&serverSelectionTimeoutMS=5000&"
     f"readPreference=primaryPreferred"
 ))
-
+MQTT_TOPIC = os.getenv("MQTT_TOPIC","pisid_maze/mazeManager/33/init")
+MQTT_GAME_MANAGER_BROKER = os.getenv("MQTT_GAME_MANAGER_BROKER", "test.mosquitto.org")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 CHECK_INTERVAL = 5  # Seconds to check process status
 
 # Process management

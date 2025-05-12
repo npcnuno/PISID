@@ -23,13 +23,14 @@ SESSION_ID = os.getenv('SESSION_ID', 'default_session')
 TOPICS_CONFIG = json.loads(os.getenv('TOPICS_CONFIG', '[]'))
 QOS = int(os.getenv('QOS', '2'))
 POLL_INTERVAL = int(os.getenv('POLL_INTERVAL', '5'))
-DELAY_TIME_BETWEEN_MESSAGES = int(os.getenv('DELAY_TIME_BETWEEN_MESSAGES', '60'))
-NUMBER_OF_RETRIES_TO_SEND_MESSAGES = int(os.getenv("NUMBER_OF_RETRIES_TO_SEND_MESSAGES", "3"))
-RETRY_CHECK_INTERVAL = float(os.getenv("RETRY_CHECK_INTERVAL", "5"))
-RETRY_BATCH_SIZE = int(os.getenv("RETRY_BATCH_SIZE", "5"))
+DELAY_TIME_BETWEEN_MESSAGES = float(os.getenv('DELAY_TIME_BETWEEN_MESSAGES', '0.25'))  # 250ms
+RETRY_CHECK_INTERVAL = float(os.getenv('RETRY_CHECK_INTERVAL', '0.05'))  # 50ms
+NUMBER_OF_RETRIES_TO_SEND_MESSAGES = int(os.getenv('NUMBER_OF_RETRIES_TO_SEND_MESSAGES', '3'))
+RETRY_BATCH_SIZE = int(os.getenv('RETRY_BATCH_SIZE', '5'))
 
 # Global variables
 pending_acks = {}
+retry_counts = {}  # Track total retries per message
 ack_lock = threading.Lock()
 collection_queues = {}
 
@@ -57,13 +58,11 @@ def connect_to_mongodb(retry_count=5, retry_delay=5):
     logger.error("Failed to connect to MongoDB")
     raise SystemExit(1)
 
-# Custom JSON encoder for datetime objects
 def json_serial(obj):
     if isinstance(obj, datetime):
         return obj.isoformat()
     raise TypeError(f"Type {type(obj)} not serializable")
 
-# MQTT setup
 def connect_to_mqtt(userdata):
     client = mqtt_client.Client(client_id=f"player_{PLAYER_ID}_sender", userdata=userdata)
     client.on_connect = on_connect
@@ -111,6 +110,9 @@ def on_message(client, userdata, msg):
                 if message_id in pending_acks:
                     del pending_acks[message_id]
                     logger.info(f"Removed message {message_id} from pending_acks after acknowledgment")
+                if message_id in retry_counts:
+                    del retry_counts[message_id]
+                    logger.info(f"Removed message {message_id} from retry_counts after acknowledgment")
         else:
             logger.warning(f"Message {message_id} not found or already processed in {collection_name}")
     except json.JSONDecodeError as e:
@@ -120,53 +122,47 @@ def on_message(client, userdata, msg):
 
 def worker_publish(mqtt_client_instance, topic, message_queue, collection_name):
     while True:
-        message_data = message_queue.get()
         try:
-            # Prepare payload
-            payload = {k: v for k, v in message_data.items() if k not in ["_id", "session_id", "processed"]}
-            payload["_id"] = str(message_data["_id"])
-            
-            serialized_payload = json.dumps(payload, default=json_serial)
-            
-            # Verify MQTT connection
-            if not mqtt_client_instance.is_connected():
-                logger.error(f"MQTT client not connected for message {message_data['_id']}")
-                raise ConnectionError("MQTT client disconnected")
-            
-            # Publish message
-            logger.info(f"Publishing message {message_data['_id']} to topic {topic}")
-            result = mqtt_client_instance.publish(topic, serialized_payload, qos=2)
-            
-            # Check publish result
-            if result.rc == 0:
-                logger.info(f"Successfully published message {message_data['_id']} (mid={result.mid})")
-                with ack_lock:
-                    pending_acks[str(message_data["_id"])] = {
-                        'topic': topic,
-                        'message': message_data,
-                        'send_time': datetime.now(),
-                        'retry_count': 0,
-                        'collection_name': collection_name
-                    }
-            else:
-                logger.error(f"Publish failed for message {message_data['_id']}: Return code {result.rc}")
-               
+            _, message_data = message_queue.get()  # Get message from PriorityQueue, ignore priority
+            try:
+                payload = {k: v for k, v in message_data.items() if k not in ["_id", "session_id", "processed"]}
+                payload["_id"] = str(message_data["_id"])
+                serialized_payload = json.dumps(payload, default=json_serial)
+                if not mqtt_client_instance.is_connected():
+                    logger.error(f"MQTT client not connected for message {message_data['_id']}")
+                    raise ConnectionError("MQTT client disconnected")
+                logger.info(f"Publishing message {message_data['_id']} to topic {topic}")
+                result = mqtt_client_instance.publish(topic, serialized_payload, qos=2)
+                if result.rc == 0:
+                    logger.info(f"Successfully published message {message_data['_id']} (mid={result.mid})")
+                    with ack_lock:
+                        pending_acks[str(message_data["_id"])] = {
+                            'topic': topic,
+                            'message': message_data,
+                            'send_time': datetime.now(),
+                            'retry_count': 0,
+                            'collection_name': collection_name
+                        }
+                else:
+                    logger.error(f"Publish failed for message {message_data['_id']}: Return code {result.rc}")
+                time.sleep(0.005)  # 5ms delay between sends
+            except Exception as e:
+                logger.error(f"Error processing message {message_data['_id']}: {str(e)}")
+            finally:
+                message_queue.task_done()
         except Exception as e:
-            logger.error(f"Error processing message {message_data['_id']}: {str(e)}") 
-        finally:
-            message_queue.task_done()
+            logger.error(f"Error retrieving message from queue: {e}")
+            time.sleep(0.01)  # Prevent busy waiting
 
 def stream_collection(collection_name, message_queue):
     collection = db[collection_name]
-    # Load unprocessed messages on startup
     try:
         messages = collection.find({"session_id": SESSION_ID, "processed": {"$ne": True}})
         for msg in messages:
-            message_queue.put(msg)
+            message_queue.put((0, msg))  # Priority 0 for new messages
             logger.debug(f"Queued unprocessed message {msg['_id']} from {collection_name}")
     except errors.PyMongoError as e:
         logger.error(f"Error querying unprocessed messages in {collection_name}: {e}")
-    # Start change stream
     while True:
         try:
             with collection.watch(
@@ -176,14 +172,14 @@ def stream_collection(collection_name, message_queue):
                 for change in stream:
                     doc = change["fullDocument"]
                     if doc.get("processed") != True:
-                        message_queue.put(doc)
+                        message_queue.put((0, doc))  # Priority 0 for new messages
                         logger.debug(f"Streamed message {doc['_id']} from {collection_name}")
         except errors.PyMongoError as e:
             logger.error(f"Change stream error in {collection_name}: {e}, falling back to polling")
             try:
                 messages = collection.find({"session_id": SESSION_ID, "processed": {"$ne": True}})
                 for msg in messages:
-                    message_queue.put(msg)
+                    message_queue.put((0, msg))  # Priority 0 for new messages
                     logger.debug(f"Polled message {msg['_id']} from {collection_name}")
             except errors.PyMongoError as e:
                 logger.error(f"Polling error in {collection_name}: {e}")
@@ -200,7 +196,9 @@ def retry_worker():
             messages_to_retry = []
             messages_to_remove = []
             for message_id, data in pending_acks.items():
-                if data['retry_count'] >= NUMBER_OF_RETRIES_TO_SEND_MESSAGES:
+                if message_id not in retry_counts:
+                    retry_counts[message_id] = 0
+                if retry_counts[message_id] >= NUMBER_OF_RETRIES_TO_SEND_MESSAGES:
                     messages_to_remove.append(message_id)
                     continue
                 elapsed = (current_time - data['send_time']).total_seconds()
@@ -209,21 +207,22 @@ def retry_worker():
                 if len(messages_to_retry) >= RETRY_BATCH_SIZE:
                     break
             for message_id, data in messages_to_retry:
+                retry_counts[message_id] += 1
                 message_queue = collection_queues.get(data['collection_name'])
                 if message_queue:
-                    message_queue.put(data['message'])
-                    data['retry_count'] += 1
+                    message_queue.put((1, data['message']))  # Priority 1 for retries
                     data['send_time'] = current_time
-                    logger.info(f"Retrying message {message_id} (attempt {data['retry_count']})")
+                    logger.info(f"Retrying message {message_id} (attempt {retry_counts[message_id]})")
             for message_id in messages_to_remove:
                 del pending_acks[message_id]
-                logger.error(f"Message {message_id} exceeded maximum retries and was removed from pending_acks")
+                if message_id in retry_counts:
+                    del retry_counts[message_id]
+                logger.error(f"Message {message_id} exceeded maximum retries and was removed")
 
 def main():
     if not TOPICS_CONFIG:
         logger.error("TOPICS_CONFIG is empty. Exiting.")
         raise SystemExit(1)
-    # Format topics
     formatted_configs = []
     for config in TOPICS_CONFIG:
         formatted_configs.append({
@@ -231,18 +230,14 @@ def main():
             'processed_topic': config['processed_topic'].format(player_id=PLAYER_ID),
             'confirmed_topic': config['confirmed_topic'].format(player_id=PLAYER_ID)
         })
-    # Create topic to collection mapping
     confirmed_topic_to_collection = {
         config['confirmed_topic']: config['collection'] for config in formatted_configs
     }
-    # Connect to MongoDB
     connect_to_mongodb()
-    # Connect to MQTT
     mqtt_client = connect_to_mqtt(userdata={'confirmed_topic_to_collection': confirmed_topic_to_collection})
-    # Start threads
     threads = []
     for config in formatted_configs:
-        message_queue = queue.Queue()
+        message_queue = queue.PriorityQueue()  # Use PriorityQueue
         collection_queues[config['collection']] = message_queue
         threads.append(threading.Thread(
             target=worker_publish,
@@ -254,12 +249,10 @@ def main():
             args=(config['collection'], message_queue),
             daemon=True
         ))
-    # Start retry thread
     retry_thread = threading.Thread(target=retry_worker, daemon=True)
     retry_thread.start()
     for thread in threads:
         thread.start()
-    # Start MQTT loop
     try:
         mqtt_client.loop_start()
         while True:

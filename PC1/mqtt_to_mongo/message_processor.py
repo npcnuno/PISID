@@ -7,7 +7,7 @@ import time
 import signal
 import sys
 from dateutil import parser as dateutil_parser
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List
 from dataclasses import dataclass
 from pymongo import MongoClient, errors
@@ -47,7 +47,7 @@ class TopicConfig:
         self.queue = queue.Queue()
         self.worker_threads: List[threading.Thread] = []
         self.lock = threading.Lock()
-
+    
     def create_model(self) -> BaseModel:
         fields = {}
         for field_name, field_info in self.schema.items():
@@ -132,6 +132,17 @@ def parse_payload(payload: str) -> dict:
         raise
 
 def stream_topic(tc: TopicConfig):
+    try:
+        messages = raw_messages_col.find({
+            "session_id": SESSION_ID,
+            "processed": {"$ne": True},
+            "topic": tc.topic
+        })
+        for msg in messages:
+            tc.queue.put(msg)
+            logger.debug(f"Enqueued historical message for {tc.topic}: {msg['_id']}")
+    except Exception as e:
+        logger.error(f"Error during batch processing for {tc.topic}: {e}")
     while True:
         try:
             pipeline = [{
@@ -178,7 +189,6 @@ def worker_topic(tc: TopicConfig):
                 logger.debug(f"Corrected player ID to {PLAYER_ID} for {tc.topic}")
             try:
                 validated = tc.model(**parsed_dict)
-
             except ValidationError as e:
                 errors = []
                 for error in e.errors():
@@ -204,15 +214,34 @@ def worker_topic(tc: TopicConfig):
                     try:
                         validated = tc.model(**parsed_dict)
                         logger.debug(", ".join(errors))
+                        with mongo_client.start_session() as session:
+                            with session.start_transaction():
+                                failed_messages_col.insert_one({
+                                    "session_id": SESSION_ID,
+                                    "topic": tc.topic,
+                                    "payload": payload,
+                                    "error": str(errors),
+                                    "timestamp": datetime.now(timezone.utc),
+                                    "processed": True
+                                }, session=session)
                     except ValidationError as e:
                         logger.error(f"Validation still failed after corrections: {e}")
                         raise
                 else:
                     raise
             doc = validated.dict()
+            # Convert datetime fields to UTC timestamps
+            for field, field_info in tc.schema.items():
+                if field_info["type"] == "datetime" and field in doc:
+                    dt = doc[field]
+                    if isinstance(dt, datetime):
+                        if dt.tzinfo is not None:
+                            dt_utc = dt.astimezone(timezone.utc)
+                        else:
+                            dt_utc = dt.replace(tzinfo=timezone.utc)
+                        doc[field] = dt_utc
             doc["session_id"] = SESSION_ID
-            doc["timestamp"] = (datetime.now() + timedelta(minutes=60)).isoformat()
-
+            doc["timestamp"] = datetime.now(timezone.utc)
             doc["processed"] = False
             with mongo_client.start_session() as session:
                 with session.start_transaction():
@@ -232,50 +261,11 @@ def worker_topic(tc: TopicConfig):
                         "topic": tc.topic,
                         "payload": payload,
                         "error": str(e),
-                        "timestamp": (datetime.now() + timedelta(minutes=60)).isoformat(),
-                        "processed": False
+                        "timestamp": datetime.now(timezone.utc),
+                        "processed": True
                     }, session=session)
         finally:
             tc.queue.task_done()
-
-def scale_threads(tc: TopicConfig):
-    while True:
-        time.sleep(CHECK_INTERVAL)
-        with tc.lock:
-            queue_size = tc.queue.qsize()
-            current_threads = len(tc.worker_threads)
-            if queue_size > SCALE_UP_THRESHOLD and current_threads < MAX_THREADS_PER_TOPIC:
-                new_threads = min(
-                    MAX_THREADS_PER_TOPIC - current_threads,
-                    (queue_size // SCALE_UP_THRESHOLD)
-                )
-                for _ in range(new_threads):
-                    t = threading.Thread(target=worker_topic, args=(tc,), daemon=True)
-                    t.start()
-                    tc.worker_threads.append(t)
-                    logger.info(f"Scaled up {tc.topic}: Total threads={len(tc.worker_threads)}")
-            elif queue_size < SCALE_DOWN_THRESHOLD and current_threads > INITIAL_THREADS_PER_TOPIC:
-                excess_threads = min(
-                    current_threads - INITIAL_THREADS_PER_TOPIC,
-                    (SCALE_DOWN_THRESHOLD - queue_size) // 2
-                )
-                for _ in range(excess_threads):
-                    tc.queue.put(None)
-                    tc.worker_threads.pop()
-                    logger.info(f"Scaled down {tc.topic}: Total threads={len(tc.worker_threads)}")
-
-def batch_process_historical(tc: TopicConfig):
-    try:
-        messages = raw_messages_col.find({
-            "session_id": SESSION_ID,
-            "processed": {"$ne": True},
-            "topic": tc.topic
-        })
-        for msg in messages:
-            tc.queue.put(msg)
-            logger.debug(f"Enqueued historical message for {tc.topic}: {msg['_id']}")
-    except Exception as e:
-        logger.error(f"Error during batch processing for {tc.topic}: {e}")
 
 def shutdown_handler(signum, frame):
     logger.info("Received shutdown signal, exiting...")
@@ -307,15 +297,13 @@ def main():
         ) for config in TOPICS_CONFIG
     ]
     for tc in topic_configs:
-        batch_process_historical(tc)
         stream_thread = threading.Thread(target=stream_topic, args=(tc,), daemon=True)
         stream_thread.start()
         for _ in range(INITIAL_THREADS_PER_TOPIC):
             worker_thread = threading.Thread(target=worker_topic, args=(tc,), daemon=True)
             worker_thread.start()
             tc.worker_threads.append(worker_thread)
-        scaling_thread = threading.Thread(target=scale_threads, args=(tc,), daemon=True)
-        scaling_thread.start()
+
     logger.info("Message processor started")
     while True:
         time.sleep(10)
