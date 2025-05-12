@@ -36,7 +36,7 @@ CREATE TABLE `Jogo` (
   `email` varchar(50) DEFAULT NULL,
   `descricao` text DEFAULT NULL,
   `jogador` varchar(50) DEFAULT NULL,
-  `scoreTotal` int(11) DEFAULT NULL,
+  `scoreTotal` float(11, 1) DEFAULT NULL,
   `dataHoraInicio` timestamp NULL DEFAULT NULL,
   `estado` boolean DEFAULT FALSE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -87,7 +87,7 @@ CREATE TABLE `OcupacaoLabirinto` (
   `sala` int(11) NOT NULL,
   `numeroMarsamiOdd` int(11) NOT NULL DEFAULT 0,
   `numeroMarsamiEven` int(11) NOT NULL DEFAULT 0,
-  `score` int(11) DEFAULT NULL,
+  `score` float(11, 1) DEFAULT NULL,
   `idJogo` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -200,30 +200,6 @@ INSERT INTO Jogo (email, descricao, jogador, scoreTotal, dataHoraInicio) VALUES
 ('bob@example.com', 'Jogo de teste do Bob', 'Bob Costa', 0, '2025-04-30 14:00:00'),
 ('carla@example.com', 'Teste do labirinto', 'Carla Dias', 0, '2025-04-30 15:30:00');
 
--- Fill MedicaoPassagem
-INSERT INTO MedicaoPassagem (hora, salaOrigem, salaDestino, marsami, status, idJogo) VALUES
-('2025-04-30 14:10:00', 1, 2, 101, 1, 1),
-('2025-04-30 14:12:00', 2, 3, 102, 1, 1),
-('2025-04-30 15:40:00', 1, 3, 201, 1, 2);
-
--- Fill OcupacaoLabirinto (will be auto-filled by trigger, but we can also manually test it)
-INSERT INTO OcupacaoLabirinto (sala, numeroMarsamiOdd, numeroMarsamiEven, score, idJogo) VALUES
-(1, 1, 0, 5, 1),
-(2, 0, 1, 10, 1),
-(3, 0, 0, 3, 2);
-
--- Fill Sound
-INSERT INTO Sound (hora, sound, idJogo) VALUES
-('2025-04-30 14:15:00', 19.50, 1),
-('2025-04-30 14:20:00', 23.10, 1),
-('2025-04-30 15:45:00', 22.30, 2);
-
--- Fill Mensagens (should be filled automatically by trigger when sound > 21, but we can add test data too)
-INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo) VALUES
-('2025-04-30 14:21:00', NULL, 23.10, 'SOM', 'sound bigger than 21', '2025-04-30 14:21:00', 1),
-('2025-04-30 15:46:00', NULL, 22.30, 'SOM', 'sound bigger than 21', '2025-04-30 15:46:00', 2);
-
-
 -- Triggers
 
 DELIMITER $$
@@ -286,11 +262,10 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
     IN p_telemovel VARCHAR(12),
     IN p_tipo SET('admin','player','tester'),
     IN p_grupo INT,
-    IN p_ativo BOOLEAN,
     IN p_pass VARCHAR(100)
 )
   BEGIN
-    DECLARE v_username VARCHAR(40);
+	DECLARE v_username VARCHAR(40);
     DECLARE at_pos INT;
 
     -- Extrai o username do email
@@ -299,22 +274,22 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
 
     IF at_pos <= 1 THEN
         SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Erro: Email inválido';
-END IF;
+            SET MESSAGE_TEXT = 'Erro: Email inválido';
+    END IF;
 
--- Verifica se o email já existe
-IF EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
-UPDATE Users
-SET nome = p_nome,
-    telemovel = p_telemovel,
-    tipo = p_tipo,
-    grupo = p_grupo,
-    ativo = TRUE
-WHERE email = p_email;
-ELSE
-    -- Insere dados na tabela Users (SEM armazenar senha)
-    INSERT INTO Users (email, nome, telemovel, tipo, grupo, ativo)
-    VALUES (p_email, p_nome, p_telemovel, p_tipo, p_grupo, TRUE);
+    -- Verifica se o email já existe
+    IF EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
+    UPDATE Users
+    SET nome = p_nome,
+        telemovel = p_telemovel,
+        tipo = p_tipo,
+        grupo = p_grupo,
+        ativo = TRUE
+    WHERE email = p_email;
+    ELSE
+        -- Insere dados na tabela Users (SEM armazenar senha)
+        INSERT INTO Users (email, nome, telemovel, tipo, grupo, ativo)
+        VALUES (p_email, p_nome, p_telemovel, p_tipo, p_grupo, TRUE);
 
     -- Cria o utilizador MySQL
     SET @sql_create_user = CONCAT('CREATE USER \'', v_username, '\'@\'%\' IDENTIFIED BY \'', p_pass, '\'');
@@ -346,15 +321,26 @@ ELSE
     EXECUTE trigger_stmt;
     DEALLOCATE PREPARE trigger_stmt;
 
-    -- Concede SELECT nas tabelas necessárias
-    SET @sql_table_access = CONCAT('GRANT SELECT ON mydb.Users TO \'', v_username, '\'@\'%\'');
-    PREPARE table_stmt FROM @sql_table_access;
-    EXECUTE table_stmt;
-    DEALLOCATE PREPARE table_stmt;
+
+    -- Remove o acesso geral às tabelas e concede acesso apenas às views específicas
+    IF p_tipo = 'player' THEN
+        SET @sql_view_access = CONCAT('GRANT SELECT ON mydb.vw_player_dados TO \'', v_username, '\'@\'%\'');
+    ELSEIF p_tipo = 'tester' THEN
+        SET @sql_view_access = CONCAT('GRANT SELECT ON mydb.vw_tester_dados TO \'', v_username, '\'@\'%\'');
+    ELSE
+        -- Admins mantêm acesso completo
+        SET @sql_view_access = CONCAT('GRANT SELECT ON mydb.* TO \'', v_username, '\'@\'%\'');
+    END IF;
+
+    PREPARE view_stmt FROM @sql_view_access;
+    EXECUTE view_stmt;
+    DEALLOCATE PREPARE view_stmt;
 
     -- Atualiza privilégios
     FLUSH PRIVILEGES;
+
     END IF;
+
 END $$
 
 DELIMITER ;
@@ -432,14 +418,76 @@ DELIMITER ;
 
 DELIMITER $$
 
+CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_utilizador`(
+IN p_Email VARCHAR(50),
+IN p_Pass VARCHAR(100),
+IN p_Nome VARCHAR(100),
+IN p_Telemovel VARCHAR(12),
+IN p_Grupo INT
+)
+BEGIN
+	DECLARE v_old_username VARCHAR(100);
+    DECLARE v_new_user VARCHAR(100);
+    DECLARE at_pos INT;
+    
+	-- Get current username and host
+    SET v_old_username = SUBSTRING_INDEX(SESSION_USER(), '@', 1);
+	SET v_new_user = v_old_username;
+    
+    IF p_Email IS NOT NULL THEN
+		IF EXISTS (SELECT 1 FROM Users WHERE p_Email = email) THEN
+			SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: O email já esta a ser usado!';
+		ELSE
+			SET at_pos = LOCATE('@', p_Email);
+			SET v_new_user = LEFT(p_Email, at_pos - 1);
+
+            SET @sql = CONCAT('RENAME USER ',  v_old_username, ' TO ', v_new_user);
+            -- select @sql;
+			PREPARE stmt FROM @sql;
+			EXECUTE stmt;
+			DEALLOCATE PREPARE stmt;
+            
+        END IF;
+    END IF;
+
+	IF p_pass IS NOT NULL THEN
+        SET @sql_default_role = CONCAT('ALTER USER \'', v_new_user, '\'@\'%\' IDENTIFIED BY \'', p_Pass, '\'');
+		PREPARE role_stmt FROM @sql_default_role;
+		EXECUTE role_stmt;
+		DEALLOCATE PREPARE role_stmt;
+	END IF;
+
+	UPDATE Users
+    SET
+		email = IF(p_email IS NOT NULL, p_Email, email),
+		nome = IF(p_Nome IS NOT NULL, p_Nome, nome),
+		telemovel = IF(p_Telemovel IS NOT NULL, p_Telemovel, telemovel),
+		grupo = IF(p_Grupo IS NOT NULL, p_Grupo, grupo)
+	WHERE email LIKE CONCAT(v_old_username, '@%');
+END $$
+
+DELIMITER ;
+
+
+DELIMITER $$
+
 CREATE PROCEDURE startGame(
 	IN p_id_jogo INT
 )
 BEGIN
-	UPDATE Jogo
-    SET estado = 1
-    WHERE idJogo = p_id_jogo;
-END$$
+	IF EXISTS (SELECT 1 FROM Jogo WHERE idJogo = p_id_jogo) THEN
+		IF EXISTS (SELECT 1 FROM Jogo WHERE idJogo = p_id_jogo AND dataHoraInicio IS NULL) THEN
+			UPDATE Jogo
+			SET estado = 1, dataHoraInicio = now()
+			WHERE idJogo = p_id_jogo;
+		ELSE
+			SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Este jogo já terminou não é possível iniciá-lo';
+		END IF;
+	ELSE
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Este jogo não existe';
+    END IF;
+
+END $$
 
 DELIMITER ;
 
@@ -450,20 +498,26 @@ CREATE PROCEDURE endGame(
 	IN p_id_jogo INT
 )
 BEGIN
-	UPDATE Jogo
-    SET estado = 0
-    WHERE idJogo = p_id_jogo;
-END$$
+	IF EXISTS (SELECT 1 FROM Jogo WHERE idJogo = p_id_jogo) THEN
+		UPDATE Jogo
+		SET estado = 0
+		WHERE idJogo = p_id_jogo;
+	ELSE
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Este jogo não existe';
+    END IF;
+
+END $$
 
 DELIMITER ;
 
+
 DELIMITER $$
 
-CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo`(
+CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo_admin`(
     IN p_idJogo INT,
     IN p_descricao TEXT,
     IN p_jogador VARCHAR(100),
-    IN p_scoreTotal INT,
+    IN p_scoreTotal float(11, 1),
     IN p_dataHoraInicio DATETIME,
     IN p_estado TINYINT
 )
@@ -521,12 +575,71 @@ BEGIN
     END IF;
 END$$
 
+DELIMITER ;
+
+
+DELIMITER $$
+    CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo`(
+    IN p_idJogo INT,
+    IN p_descricao TEXT
+)
+BEGIN
+    DECLARE v_userType VARCHAR(10);
+    DECLARE v_gameIsRunning BOOLEAN;
+    DECLARE v_userEmail VARCHAR(255);
+    DECLARE v_jogoEmail VARCHAR(255);
+
+    -- Obtém o email do usuário atual (parte antes do @)
+    SET v_userEmail = CONCAT(SUBSTRING_INDEX(USER(), '@', 1), '%');
+
+    -- Verifica se o jogo existe e obtém o estado e email do proprietário
+    SELECT estado, email INTO v_gameIsRunning, v_jogoEmail
+    FROM Jogo WHERE idJogo = p_idJogo;
+
+    -- Verifica se o jogo existe
+    IF v_jogoEmail IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Jogo não encontrado.';
+    END IF;
+
+    -- Obtém o tipo de usuário que está tentando modificar
+    SELECT tipo INTO v_userType
+    FROM Users
+    WHERE email LIKE v_userEmail;
+
+    -- Verifica se o usuário existe e é tester ou player
+    IF v_userType IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Usuário não encontrado.';
+    ELSEIF v_userType NOT IN ('tester', 'player') THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Apenas testers e players podem alterar jogos.';
+    END IF;
+
+    -- Verifica se o usuário é o dono do jogo
+    IF NOT EXISTS (SELECT 1 FROM Users WHERE email LIKE v_userEmail AND email = v_jogoEmail) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Você só pode alterar seus próprios jogos.';
+    END IF;
+
+    -- Verifica se o jogo está em execução
+    IF v_gameIsRunning THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Jogo em execução não pode ser alterado.';
+    END IF;
+
+    -- Atualiza a descrição do jogo
+    UPDATE Jogo
+    SET descricao = IFNULL(p_descricao, descricao)
+    WHERE idJogo = p_idJogo;
+END$$
 
 DELIMITER ;
 
+
 DELIMITER $$
 
-CREATE DEFINER='root'@'%' PROCEDURE Criar_jogo(
+CREATE DEFINER='root'@'%' PROCEDURE Criar_jogo_admin(
     IN p_email VARCHAR(50),
     IN p_descricao TEXT,
     IN p_jogador VARCHAR(100),
@@ -552,6 +665,54 @@ END$$
 DELIMITER ;
 
 
+DELIMITER $$
+
+CREATE DEFINER=`root`@`%` PROCEDURE `Criar_jogo`(
+    IN p_descricao TEXT
+)
+BEGIN
+    DECLARE v_user_type VARCHAR(20);
+    DECLARE v_email VARCHAR(255);
+    DECLARE v_username VARCHAR(50);
+    DECLARE user_count INT;
+
+    -- Obtém apenas o nome do usuário (parte antes do @)
+    SET v_username = SUBSTRING_INDEX(USER(), '@', 1);
+
+    -- Conta quantos usuários começam com este username (independente do domínio)
+    SELECT COUNT(*) INTO user_count FROM Users
+    WHERE email LIKE CONCAT(v_username, '@%');
+
+    -- Verifica se encontrou exatamente um usuário
+    IF user_count = 0 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Nenhum usuário encontrado com este nome';
+    ELSEIF user_count > 1 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Múltiplos usuários encontrados com este nome';
+    END IF;
+
+    -- Obtém o email completo do usuário
+    SELECT email INTO v_email FROM Users
+    WHERE email LIKE CONCAT(v_username, '@%') LIMIT 1;
+
+    -- Obtém o tipo de utilizador
+    SELECT tipo INTO v_user_type FROM Users WHERE email = v_email;
+
+    -- Verifica se o usuário tem permissão para criar jogos
+    IF v_user_type NOT IN ('admin', 'player', 'tester') THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Erro: Usuário não tem permissão para criar jogos';
+    END IF;
+
+        -- Insere o novo jogo
+    INSERT INTO Jogo (email, descricao, jogador, scoreTotal, dataHoraInicio, estado)
+    VALUES (v_email, p_descricao, NULL, 0, NULL, FALSE);
+
+END$$
+
+DELIMITER ;
+
 # - - administrador - -
 # TABLES
 -- Conceda acesso ao schema inteiro (substitua 'meu_schema' pelo nome correto)
@@ -560,15 +721,15 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON Jogo TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON MedicaoPassagem TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON OcupacaoLabirinto TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON Sound TO "admin";
-GRANT SELECT, INSERT, UPDATE, DELETE ON Users TO "admin";
+GRANT SELECT, INSERT, UPDATE, DELETE ON mydb.Users TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON Mensagens TO "admin";
 # STORED PROCEDURES
 GRANT EXECUTE ON PROCEDURE Criar_utilizador TO "admin";
-# GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "admin";
+GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "admin";
 GRANT EXECUTE ON PROCEDURE Remover_utilizador TO "admin";
 GRANT EXECUTE ON PROCEDURE Criar_jogo TO "admin";
 GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "admin";
-# GRANT EXECUTE ON PROCEDURE Remover_jogo TO "admin";
+GRANT EXECUTE ON PROCEDURE Remover_jogo TO "admin";
 
 # - - jogador - -
 # TABLES
@@ -580,9 +741,9 @@ GRANT SELECT, INSERT ON Sound TO "player";
 GRANT SELECT, UPDATE ON Users TO "player";
 GRANT SELECT, INSERT ON Mensagens TO "player";
 # STORED PROCEDURES
-# GRANT EXECUTE ON PROCEDURE startGame TO "player";
-# GRANT EXECUTE ON PROCEDURE getPoints TO "player";
-# GRANT EXECUTE ON PROCEDURE endGame TO "player";
+GRANT EXECUTE ON PROCEDURE startGame TO "player";
+GRANT EXECUTE ON PROCEDURE getPoints TO "player";
+GRANT EXECUTE ON PROCEDURE endGame TO "player";
 GRANT EXECUTE ON PROCEDURE Criar_jogo TO "player";
 GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "player";
 
@@ -596,8 +757,9 @@ GRANT SELECT ON Sound TO "tester";
 GRANT SELECT ON Mensagens TO "tester";
 GRANT SELECT, UPDATE ON Users TO "tester";
 # STORED PROCEDURES
-# GRANT EXECUTE ON PROCEDURE startGame TO "tester";
-# GRANT EXECUTE ON PROCEDURE getPoints TO "tester";
-# GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "tester";
+GRANT EXECUTE ON PROCEDURE endGame TO "tester";
+GRANT EXECUTE ON PROCEDURE startGame TO "tester";
+GRANT EXECUTE ON PROCEDURE getPoints TO "tester";
+GRANT EXECUTE ON PROCEDURE Alterar_utilizador TO "tester";
 GRANT EXECUTE ON PROCEDURE Criar_jogo TO "tester";
 GRANT EXECUTE ON PROCEDURE Alterar_jogo TO "tester";
