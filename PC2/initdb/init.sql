@@ -286,6 +286,7 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
     IN p_telemovel VARCHAR(12),
     IN p_tipo SET('admin','player','tester'),
     IN p_grupo INT,
+    IN p_ativo BOOLEAN,
     IN p_pass VARCHAR(100)
 )
   BEGIN
@@ -298,19 +299,19 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
 
     IF at_pos <= 1 THEN
         SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Erro: Email inválido';
-END IF;
+            SET MESSAGE_TEXT = 'Erro: Email inválido';
+    END IF;
 
--- Verifica se o email já existe
-IF EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
-UPDATE Users
-SET nome = p_nome,
-    telemovel = p_telemovel,
-    tipo = p_tipo,
-    grupo = p_grupo,
-    ativo = TRUE
-WHERE email = p_email;
-ELSE
+    -- Verifica se o email já existe
+    IF EXISTS (SELECT 1 FROM Users WHERE email = p_email) THEN
+    UPDATE Users
+    SET nome = p_nome,
+        telemovel = p_telemovel,
+        tipo = p_tipo,
+        grupo = p_grupo,
+        ativo = TRUE
+    WHERE email = p_email;
+    ELSE
     -- Insere dados na tabela Users (SEM armazenar senha)
     INSERT INTO Users (email, nome, telemovel, tipo, grupo, ativo)
     VALUES (p_email, p_nome, p_telemovel, p_tipo, p_grupo, TRUE);
@@ -524,7 +525,7 @@ DELIMITER ;
 
 
 DELIMITER $$
-    CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo_tester_player`(
+    CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_jogo`(
     IN p_idJogo INT,
     IN p_descricao TEXT
 )
