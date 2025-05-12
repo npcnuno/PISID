@@ -286,7 +286,6 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
     IN p_telemovel VARCHAR(12),
     IN p_tipo SET('admin','player','tester'),
     IN p_grupo INT,
-    IN p_ativo BOOLEAN,
     IN p_pass VARCHAR(100)
 )
   BEGIN
@@ -432,14 +431,79 @@ DELIMITER ;
 
 DELIMITER $$
 
+CREATE DEFINER=`root`@`%` PROCEDURE `Alterar_utilizador`(
+IN p_Email VARCHAR(50),
+IN p_Pass VARCHAR(100),
+IN p_Nome VARCHAR(100),
+IN p_Telemovel VARCHAR(12),
+IN p_Grupo INT
+)
+BEGIN
+	DECLARE v_old_username VARCHAR(100);
+    DECLARE v_new_user VARCHAR(100);
+    DECLARE at_pos INT;
+    
+	-- Get current username and host
+    SET v_old_username = SUBSTRING_INDEX(SESSION_USER(), '@', 1);
+	SET v_new_user = v_old_username;
+    
+    IF p_Email IS NOT NULL THEN
+		IF EXISTS (SELECT 1 FROM Users WHERE p_Email = email) THEN
+			SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: O email já esta a ser usado!';
+		ELSE
+			SET at_pos = LOCATE('@', p_Email);
+			SET v_new_user = LEFT(p_Email, at_pos - 1);
+
+            SET @sql = CONCAT('RENAME USER ',  v_old_username, ' TO ', v_new_user);
+            -- select @sql;
+			PREPARE stmt FROM @sql;
+			EXECUTE stmt;
+			DEALLOCATE PREPARE stmt;
+            
+        END IF;
+    END IF;
+    
+    select concat("User atual depois de mudar: ", v_new_user);
+    select concat("User atual antes de mudar: ", v_old_username);
+
+	IF p_pass IS NOT NULL THEN
+        SET @sql_default_role = CONCAT('ALTER USER \'', v_new_user, '\'@\'%\' IDENTIFIED BY \'', p_Pass, '\'');
+		PREPARE role_stmt FROM @sql_default_role;
+		EXECUTE role_stmt;
+		DEALLOCATE PREPARE role_stmt;
+	END IF;
+
+	UPDATE Users
+    SET
+		email = IF(p_email IS NOT NULL, p_Email, email),
+		nome = IF(p_Nome IS NOT NULL, p_Nome, nome),
+		telemovel = IF(p_Telemovel IS NOT NULL, p_Telemovel, telemovel),
+		grupo = IF(p_Grupo IS NOT NULL, p_Grupo, grupo)
+	WHERE email LIKE CONCAT(v_old_username, '@%');
+END $$
+
+DELIMITER ;
+
+
+DELIMITER $$
+
 CREATE PROCEDURE startGame(
 	IN p_id_jogo INT
 )
 BEGIN
-	UPDATE Jogo
-    SET estado = 1
-    WHERE idJogo = p_id_jogo;
-END$$
+	IF EXISTS (SELECT 1 FROM Jogo WHERE idJogo = p_id_jogo) THEN
+		IF EXISTS (SELECT 1 FROM Jogo WHERE idJogo = p_id_jogo AND dataHoraInicio IS NULL) THEN
+			UPDATE Jogo
+			SET estado = 1, dataHoraInicio = now()
+			WHERE idJogo = p_id_jogo;
+		ELSE
+			SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Este jogo já terminou não é possível iniciá-lo';
+		END IF;
+	ELSE
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Este jogo não existe';
+    END IF;
+
+END $$
 
 DELIMITER ;
 
@@ -450,12 +514,18 @@ CREATE PROCEDURE endGame(
 	IN p_id_jogo INT
 )
 BEGIN
-	UPDATE Jogo
-    SET estado = 0
-    WHERE idJogo = p_id_jogo;
-END$$
+	IF EXISTS (SELECT 1 FROM Jogo WHERE idJogo = p_id_jogo) THEN
+		UPDATE Jogo
+		SET estado = 0
+		WHERE idJogo = p_id_jogo;
+	ELSE
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Erro: Este jogo não existe';
+    END IF;
+
+END $$
 
 DELIMITER ;
+
 
 DELIMITER $$
 
@@ -560,7 +630,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON Jogo TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON MedicaoPassagem TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON OcupacaoLabirinto TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON Sound TO "admin";
-GRANT SELECT, INSERT, UPDATE, DELETE ON Users TO "admin";
+GRANT SELECT, INSERT, UPDATE, DELETE ON mydb.Users TO "admin";
 GRANT SELECT, INSERT, UPDATE, DELETE ON Mensagens TO "admin";
 # STORED PROCEDURES
 GRANT EXECUTE ON PROCEDURE Criar_utilizador TO "admin";
