@@ -286,11 +286,10 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
     IN p_telemovel VARCHAR(12),
     IN p_tipo SET('admin','player','tester'),
     IN p_grupo INT,
-    IN p_ativo BOOLEAN,
     IN p_pass VARCHAR(100)
 )
   BEGIN
-    DECLARE v_username VARCHAR(40);
+	DECLARE v_username VARCHAR(40);
     DECLARE at_pos INT;
 
     -- Extrai o username do email
@@ -312,9 +311,9 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
         ativo = TRUE
     WHERE email = p_email;
     ELSE
-    -- Insere dados na tabela Users (SEM armazenar senha)
-    INSERT INTO Users (email, nome, telemovel, tipo, grupo, ativo)
-    VALUES (p_email, p_nome, p_telemovel, p_tipo, p_grupo, TRUE);
+        -- Insere dados na tabela Users (SEM armazenar senha)
+        INSERT INTO Users (email, nome, telemovel, tipo, grupo, ativo)
+        VALUES (p_email, p_nome, p_telemovel, p_tipo, p_grupo, TRUE);
 
     -- Cria o utilizador MySQL
     SET @sql_create_user = CONCAT('CREATE USER \'', v_username, '\'@\'%\' IDENTIFIED BY \'', p_pass, '\'');
