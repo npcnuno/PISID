@@ -526,7 +526,7 @@ DELIMITER ;
 
 DELIMITER $$
 
-CREATE DEFINER='root'@'%' PROCEDURE Criar_jogo(
+CREATE DEFINER='root'@'%' PROCEDURE Criar_jogo_admin(
     IN p_email VARCHAR(50),
     IN p_descricao TEXT,
     IN p_jogador VARCHAR(100),
@@ -551,6 +551,32 @@ END$$
 
 DELIMITER ;
 
+
+DELIMITER $$
+
+CREATE DEFINER=`root`@`%` PROCEDURE `Criar_jogo`(
+    IN p_descricao TEXT
+)
+BEGIN
+    DECLARE v_user_type ENUM('tester','player');
+    DECLARE v_email VARCHAR(255);
+
+    -- Obtém o email do usuário atual
+    SET v_email = SUBSTRING_INDEX(USER(), '@', 1);
+
+    -- Verifica se o utilizador existe
+    IF NOT EXISTS (SELECT 1 FROM Users WHERE email = v_email) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Erro: Email não encontrado na tabela Users';
+    END IF;
+
+    -- Insere o novo jogo
+    INSERT INTO Jogo (email, descricao, jogador, scoreTotal, dataHoraInicio, estado)
+    VALUES (v_email, p_descricao, NULL, 0, NOW(), FALSE);
+
+END$$
+
+DELIMITER ;
 
 # - - administrador - -
 # TABLES
