@@ -33,17 +33,16 @@ services:
     restart: always
     networks:
       - mysql-network
-  # php:
-  #   build: ./php
-  #   container_name: php
-  #   depends_on:
-  #     - mysql
-  #   ports:
-  #     - "5001:5000"               # Apache inside listens on 80
-  #
-  #   networks:
-  #     - mysql-network
-  #   restart: always
+  php:
+    build: ./php
+    container_name: php
+    #depends_on:
+    #  - mysql
+    ports:
+      - "5001:5000"               # Apache inside listens on 80
+    networks:
+      - mysql-network
+    restart: always
 
   # mongodb_to_mysql:
   #   build: ./mongodb_to_mysql

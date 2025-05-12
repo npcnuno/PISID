@@ -100,21 +100,26 @@
     </form>
 
     <h3>Seus Jogos</h3>
-    <ul>
-      {% for jogo in jogos %}
-        <li>
-          <span>{{ jogo.descricao }}</span>
-          <span>
-            {% if not jogo.dataHoraInicio %}
-              <a href="/edit/{{ jogo.idJogo }}">Editar</a> |
-              <a href="/start/{{ jogo.idJogo }}">Iniciar</a>
-            {% else %}
-              <em>Iniciado</em>
-            {% endif %}
-          </span>
-        </li>
-      {% endfor %}
-    </ul>
+<ul>
+  {% if jogos %}
+    {% for jogo in jogos %}
+      <li>
+        <span>{{ jogo.descricao }}</span>
+        <span>
+          {% if not jogo.dataHoraInicio %}
+            <a href="/scripts/web/edit/{{ jogo.idJogo }}">Editar</a> |
+            <a href="/scripts/web/start/{{ jogo.idJogo }}">Iniciar</a>
+          {% else %}
+            <em>Iniciado</em>
+          {% endif %}
+        </span>
+      </li>
+    {% endfor %}
+  {% else %}
+    <li><em>Jogos não encontrados</em></li>
+  {% endif %}
+</ul>
+
 
     <a class="logout" href="/logout">Sair</a>
   </div>
