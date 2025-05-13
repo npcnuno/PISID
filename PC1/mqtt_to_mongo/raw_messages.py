@@ -20,7 +20,7 @@ MQTT_PORT = int(os.getenv('MQTT_PORT', '1883'))
 PLAYER_ID = int(os.getenv('PLAYER_ID', '33'))
 SESSION_ID = os.getenv('SESSION_ID', 'default_session')
 TOPICS_CONFIG = json.loads(os.getenv('TOPICS_CONFIG', '[]'))
-DELAY_TIME_BETWEEN_MESSAGES = int(os.getenv('DELAY_TIME_BETWEEN_MESSAGES', '60')) 
+DELAY_BETWEEN_MESSAGES = float(os.getenv('DELAY_TIME_BETWEEN_MESSAGES', '5'))
 MONGO_DB = os.getenv("MONGO_DB", "game_monitoring")
 # MongoDB setup
 mongo_client = MongoClient(MONGO_URI)
@@ -98,7 +98,7 @@ def worker(topic: str):
                         is_duplicate = True
                     else:
                         message_maps[topic][msg.mid] = hash_value
-                if hash_value in hash_maps[topic] and (current_time - hash_maps[topic][hash_value]) < DELAY_TIME_BETWEEN_MESSAGES:
+                if hash_value in hash_maps[topic] and (current_time - hash_maps[topic][hash_value]) < DELAY_BETWEEN_MESSAGES:
                     is_duplicate = True
                 hash_maps[topic][hash_value] = current_time
             if is_duplicate:

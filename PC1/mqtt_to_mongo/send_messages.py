@@ -23,15 +23,18 @@ SESSION_ID = os.getenv('SESSION_ID', 'default_session')
 TOPICS_CONFIG = json.loads(os.getenv('TOPICS_CONFIG', '[]'))
 QOS = int(os.getenv('QOS', '2'))
 POLL_INTERVAL = int(os.getenv('POLL_INTERVAL', '5'))
-DELAY_TIME_BETWEEN_MESSAGES = float(os.getenv('DELAY_TIME_BETWEEN_MESSAGES', '0.250'))  
-RETRY_CHECK_INTERVAL = float(os.getenv('RETRY_CHECK_INTERVAL', '0.250'))  
+BATCH_DELAY_TIME = float(os.getenv('BATCH_DELAY_TIME', '0.250'))  
 RETRY_BATCH_SIZE = int(os.getenv('RETRY_BATCH_SIZE', '5'))
+DELAY_TIME_BETWEEN_SENDS = float(os.getenv("DELAY_TIME_BETWEEN_SENDS", "0.005"))
 
 # Global variables
 pending_acks = {}
-retry_counts = {}  # Track total retries per message
+retry_counts = {}  
 ack_lock = threading.Lock()
 collection_queues = {}
+threads = []
+mqtt_topics_configs = []
+
 
 def connect_to_mongodb(retry_count=5, retry_delay=5):
     global mongo_client, db
@@ -144,21 +147,20 @@ def worker_publish(mqtt_client_instance, topic, message_queue, collection_name):
                         }
                 else:
                     logger.error(f"Publish failed for message {message_data['_id']}: Return code {result.rc}")
-                time.sleep(0.005)  # 5ms delay between sends
+                time.sleep(DELAY_TIME_BETWEEN_SENDS) 
             except Exception as e:
                 logger.error(f"Error processing message {message_data['_id']}: {str(e)}")
             finally:
                 message_queue.task_done()
         except Exception as e:
             logger.error(f"Error retrieving message from queue: {e}")
-            time.sleep(0.01)  # Prevent busy waiting
 
 def stream_collection(collection_name, message_queue):
     collection = db[collection_name]
     try:
         messages = collection.find({"session_id": SESSION_ID, "processed": {"$ne": True}})
         for msg in messages:
-            message_queue.put((0, msg))  # Priority 0 for new messages
+            message_queue.put((0, msg))  
             logger.debug(f"Queued unprocessed message {msg['_id']} from {collection_name}")
     except errors.PyMongoError as e:
         logger.error(f"Error querying unprocessed messages in {collection_name}: {e}")
@@ -189,7 +191,7 @@ def stream_collection(collection_name, message_queue):
 
 def retry_worker():
     while True:
-        time.sleep(RETRY_CHECK_INTERVAL)
+        time.sleep(BATCH_DELAY_TIME)
         current_time = datetime.now()
         with ack_lock:
             messages_to_retry = []
@@ -198,7 +200,7 @@ def retry_worker():
                 if message_id not in retry_counts:
                     retry_counts[message_id] = 0
                 elapsed = (current_time - data['send_time']).total_seconds()
-                if elapsed > DELAY_TIME_BETWEEN_MESSAGES:
+                if elapsed > BATCH_DELAY_TIME:
                     messages_to_retry.append((message_id, data))
                 if len(messages_to_retry) >= RETRY_BATCH_SIZE:
                     break
@@ -219,20 +221,21 @@ def main():
     if not TOPICS_CONFIG:
         logger.error("TOPICS_CONFIG is empty. Exiting.")
         raise SystemExit(1)
-    formatted_configs = []
+    
     for config in TOPICS_CONFIG:
-        formatted_configs.append({
+        mqtt_topics_configs.append({
             'collection': config['collection'],
             'processed_topic': config['processed_topic'].format(player_id=PLAYER_ID),
             'confirmed_topic': config['confirmed_topic'].format(player_id=PLAYER_ID)
         })
     confirmed_topic_to_collection = {
-        config['confirmed_topic']: config['collection'] for config in formatted_configs
+        config['confirmed_topic']: config['collection'] for config in mqtt_topics_configs
     }
+    
     connect_to_mongodb()
     mqtt_client = connect_to_mqtt(userdata={'confirmed_topic_to_collection': confirmed_topic_to_collection})
-    threads = []
-    for config in formatted_configs:
+
+    for config in mqtt_topics_configs:
         message_queue = queue.PriorityQueue()  # Use PriorityQueue
         collection_queues[config['collection']] = message_queue
         threads.append(threading.Thread(
@@ -247,6 +250,7 @@ def main():
         ))
     retry_thread = threading.Thread(target=retry_worker, daemon=True)
     retry_thread.start()
+
     for thread in threads:
         thread.start()
     try:

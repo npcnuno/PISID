@@ -27,13 +27,8 @@ SESSION_ID = os.getenv('SESSION_ID')
 PLAYER_ID = int(os.getenv('PLAYER_ID', '33'))
 MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017')
 MONGO_DB = os.getenv("MONGO_DB", "game_monitoring")
-INITIAL_THREADS_PER_TOPIC = 1
-MAX_THREADS_PER_TOPIC = 5
-CHECK_INTERVAL = 5
-SCALE_UP_THRESHOLD = 50
-SCALE_DOWN_THRESHOLD = 5
-POLL_INTERVAL = 1
-
+PROCESSING_THREADS_PER_TOPIC = int(os.getenv("PROCESSING_THREADS_PER_TOPIC", "1"))
+POLL_INTERVAL = float(os.getenv("POLL_INTERVAL","0.250"))
 
 @dataclass
 class TopicConfig:
@@ -73,6 +68,7 @@ class TopicConfig:
                     fields[field_name] = (field_type, default)
         return create_model(f"{self.topic}_Model", **fields)
 
+topic_configs: List[TopicConfig] = []
 
 def connect_to_mongodb(retry_count=5, retry_delay=5) -> bool:
     global mongo_client, db, raw_messages_col, failed_messages_col
@@ -274,9 +270,6 @@ def shutdown_handler(signum, frame):
             tc.queue.put(None)
     sys.exit(0)
 
-# Global topic configurations
-topic_configs: List[TopicConfig] = []
-
 def main():
     global topic_configs
     connect_to_mongodb()
@@ -299,7 +292,7 @@ def main():
     for tc in topic_configs:
         stream_thread = threading.Thread(target=stream_topic, args=(tc,), daemon=True)
         stream_thread.start()
-        for _ in range(INITIAL_THREADS_PER_TOPIC):
+        for _ in range(PROCESSING_THREADS_PER_TOPIC):
             worker_thread = threading.Thread(target=worker_topic, args=(tc,), daemon=True)
             worker_thread.start()
             tc.worker_threads.append(worker_thread)
