@@ -2,7 +2,6 @@ import threading
 from datetime import datetime
 import logging
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Graph:
@@ -25,7 +24,7 @@ class Graph:
             if room1 in self.rooms and room2 in self.rooms:
                 self.adjacency[room1].append(room2)  # Directed edge: room1 -> room2
                 key = (room1, room2)  # Ordered tuple for directed door
-                self.door_states[key] = False
+                self.door_states[key] = True  # Doors start open
             else:
                 logging.error(f"Cannot add corridor: Room {room1} or {room2} does not exist")
 
@@ -34,7 +33,7 @@ class Graph:
             if room_id in self.rooms:
                 self.rooms[room_id].update({'odds': odds, 'evens': evens, 'points': points})
                 if marsami is not None and is_new_room:
-                    logging.info(f"Marsami {marsami} moved to room {room_id} (Graph updated: odds={odds}, evens={evens})")
+                    logging.info(f"Marsami {marsami} moved to room {room_id} (odds={odds}, evens={evens})")
                 self.last_movement_time[room_id] = datetime.now()
 
     def get_room_state(self, room_id):
@@ -51,4 +50,4 @@ class Graph:
             key = (room1, room2)
             if key in self.door_states:
                 self.door_states[key] = state
-                logging.info(f"Door state updated: {room1} -> {room2} set to {'open' if state else 'closed'}")
+                logging.info(f"Door {room1} -> {room2} set to {'open' if state else 'closed'}")

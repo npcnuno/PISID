@@ -310,7 +310,7 @@ def validate_and_log_invalid_movement(marsami, sala_origem, sala_destino, hora_e
             mensagem = f"Movimento inválido de {sala_origem} para {sala_destino} pelo marsami {marsami}"
             insert_sql = """
             INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-            VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, NFROM_UNIXTIME(NOW()), %s)
+            VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, FROM_UNIXTIME(NOW()), %s)
         """
             cursor.execute(insert_sql, (
                 hora_evento,  # hora real do evento
@@ -377,7 +377,7 @@ def validate_and_log_outlier_sound(actual_sound, hora_evento):
             mensagem = f"Outlier de som com o valor de: {actual_sound}"
             insert_sql = """
             INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-            VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, NFROM_UNIXTIME(NOW()), %s)
+            VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, FROM_UNIXTIME(NOW()), %s)
         """
             cursor.execute(insert_sql, (
                 hora_evento,  # hora real do evento
