@@ -1,11 +1,20 @@
 # app.py
-import mysql.connector
-from flask import Blueprint, request, jsonify
+import os
 
-from routes.web import get_db
+import mysql.connector
+from flask import Blueprint, request, jsonify, session, abort
+from dotenv import load_dotenv
 
 android = Blueprint('android', __name__)
 
+load_dotenv()
+def get_db():
+    return mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="rootpass",
+        database="mydb"
+    )
 def run_stored_procedure(proc_name, args=None):
     conn = get_db()
     cursor = conn.cursor()
@@ -52,9 +61,10 @@ def close_all_doors():
 
 @android.route("/getMsgs.php", methods=["POST"])
 def get_msgs():
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
     try:
-        conn = get_db()
-        cursor = conn.cursor(dictionary=True)
+
         cursor.execute("""
             SELECT 
                 m.mensagem AS Msg,
@@ -83,10 +93,11 @@ def get_msgs():
 
 @android.route("/getSensors.php", methods=["POST"])
 def get_sensors():
+    sensor_id = int(request.form["sensor"])
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
     try:
-        sensor_id = int(request.form["sensor"])
-        conn = get_db()
-        cursor = conn.cursor(dictionary=True)
+
         cursor.execute("""
             SELECT s.hora AS Hora, s.Soundcol AS Sound, o.sala AS Room, s.idSound AS Sensor, 
                 m.tipoAlerta AS TipoMensagensa, m.horaEscrita AS HoraEscrita
@@ -117,9 +128,10 @@ def start_game():
 
 @android.route("/getMarsamRoom.php", methods=["POST"])
 def get_marsam_data():
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
     try:
-        conn = get_db()
-        cursor = conn.cursor(dictionary=True)
+
         cursor.execute("SELECT MAX(idJogo) AS max_id FROM OcupacaoLabirinto")
         max_id = cursor.fetchone()["max_id"]
         if max_id is None:
@@ -130,7 +142,12 @@ def get_marsam_data():
             WHERE idJogo = %s
             ORDER BY sala
         """, (max_id,))
-        return jsonify(cursor.fetchall()), 200
+        data = cursor.fetchall()
+        filtered_data = [row for row in data if row['sala'] != 0]
+
+        # Convert to JSON
+        json = jsonify(filtered_data)
+        return json, 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
