@@ -322,19 +322,12 @@ CREATE DEFINER=`root`@`%` PROCEDURE `Criar_utilizador`(
     DEALLOCATE PREPARE trigger_stmt;
 
 
-    -- Remove o acesso geral às tabelas e concede acesso apenas às views específicas
-    IF p_tipo = 'player' THEN
-        SET @sql_view_access = CONCAT('GRANT SELECT ON mydb.vw_player_dados TO \'', v_username, '\'@\'%\'');
-    ELSEIF p_tipo = 'tester' THEN
-        SET @sql_view_access = CONCAT('GRANT SELECT ON mydb.vw_tester_dados TO \'', v_username, '\'@\'%\'');
-    ELSE
-        -- Admins mantêm acesso completo
-        SET @sql_view_access = CONCAT('GRANT SELECT ON mydb.* TO \'', v_username, '\'@\'%\'');
-    END IF;
+    -- Concede SELECT nas tabelas necessárias
+    SET @sql_table_access = CONCAT('GRANT SELECT ON mydb.* TO \'', v_username, '\'@\'%\'');
+    PREPARE table_stmt FROM @sql_table_access;
+    EXECUTE table_stmt;
+    DEALLOCATE PREPARE table_stmt;
 
-    PREPARE view_stmt FROM @sql_view_access;
-    EXECUTE view_stmt;
-    DEALLOCATE PREPARE view_stmt;
 
     -- Atualiza privilégios
     FLUSH PRIVILEGES;
