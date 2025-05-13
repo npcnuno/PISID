@@ -28,4 +28,8 @@ app.register_blueprint(android, url_prefix='/scripts/php')
 
 
 if __name__ == "__main__":
+<<<<<<< Updated upstream
     app.run( host='0.0.0.0', port=5000)
+=======
+    app.run(host="0.0.0.0", port=5000, debug=True)
+>>>>>>> Stashed changes
