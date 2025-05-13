@@ -7,7 +7,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class DatabaseManager:
-    def __init__(self, graph, player_email, fresh_start, cloud_pool, local_pool, decision_maker, decision_condition, current_sound, sound_condition):
+    def __init__(self, graph, player_email, fresh_start, cloud_pool, local_pool, decision_maker, decision_condition):
         self.graph = graph
         self.player_email = player_email
         self.fresh_start = fresh_start
@@ -15,8 +15,6 @@ class DatabaseManager:
         self.local_pool = local_pool
         self.decision_maker = decision_maker
         self.decision_condition = decision_condition
-        self.current_sound = current_sound
-        self.sound_condition = sound_condition
         self.game_id = None
         self.number_marsamis = 0
         self.marsami_positions = {}
@@ -24,7 +22,6 @@ class DatabaseManager:
         self.valid_rooms = set()
         self.running = True
         self.last_movement_hora = datetime.min
-        self.last_sound_hora = datetime.min
         self._load_maze_structure()
         self._load_initial_state()
         
@@ -73,11 +70,9 @@ class DatabaseManager:
                 conn.close()
         else:
             self.game_id = self._fetch_latest_game_id()
-            logging.critical(self.game_id)
             if not self.game_id:
                 self.fresh_start = True
                 return
-            # Get numbermarsamis from cloud database
             cloud_conn = self.cloud_pool.get_connection()
             try:
                 with cloud_conn.cursor(dictionary=True) as cursor:
@@ -89,7 +84,6 @@ class DatabaseManager:
             finally:
                 cloud_conn.close()
 
-            # Get movements and sounds from local database
             local_conn = self.local_pool.get_connection()
             try:
                 with local_conn.cursor(dictionary=True) as cursor1:
@@ -108,19 +102,6 @@ class DatabaseManager:
                     self.marsami_positions = {m['marsami']: (m['salaDestino'], m['status']) for m in movements}
                     self.marsami_last_timestamp = {m['marsami']: m['hora'] for m in movements}
                     self.last_movement_hora = max(m['hora'] for m in movements) if movements else datetime.min
-                    cursor1.execute("SELECT hora FROM Sound WHERE idJogo = %s ORDER BY hora DESC LIMIT 1", (self.game_id))
-                    result = cursor1.fetchone()
-                    self.last_sound_hora = result['hora'] if result else datetime.min
-                    room_counts = {room_id: {'odds': 0, 'evens': 0} for room_id in self.graph.rooms}
-                    for m in movements:
-                        room_id = m['salaDestino']
-                        if room_id in self.valid_rooms:
-                            if m['marsami'] % 2 == 0:
-                                room_counts[room_id]['evens'] += 1
-                            else:
-                                room_counts[room_id]['odds'] += 1
-                    for room_id, counts in room_counts.items():
-                        self.graph.update_room(room_id, counts['odds'], counts['evens'], 0)
             except MySQLError as e:
                 logging.error(f"Error loading state: {e}")
             finally:
@@ -161,10 +142,9 @@ class DatabaseManager:
             elapsed = time.time() - start_time
             sleep_time = max(0.25 - elapsed, 0)
             time.sleep(sleep_time)
-
+            
     def _process_movement_batch(self, movements):
         room_changes = {room_id: {'odds': 0, 'evens': 0} for room_id in self.graph.rooms}
-        updated_marsamis = set()
         with self.graph.lock:
             for m in movements:
                 marsami = m['marsami']
@@ -177,69 +157,24 @@ class DatabaseManager:
                     continue
                 logging.info(f"Processing marsami {marsami} to room {new_room}")
                 self.marsami_last_timestamp[marsami] = hora
-                updated_marsamis.add(marsami)
-                if salaOrigem == "0" and new_room == "0":
-                    self.decision_maker.mark_marsami_inactive(marsami)
-                    current_room, _ = self.marsami_positions.get(marsami, (None, None))
-                    if current_room:
-                        self.marsami_positions[marsami] = (current_room, status)
-                else:
-                    old_room = self.marsami_positions.get(marsami, (None, None))[0]
-                    if old_room and old_room in self.valid_rooms:
-                        if marsami % 2 == 0:
-                            room_changes[old_room]['evens'] -= 1
-                        else:
-                            room_changes[old_room]['odds'] -= 1
-                    self.marsami_positions[marsami] = (new_room, status)
-                    if new_room in self.valid_rooms:
-                        if marsami % 2 == 0:
-                            room_changes[new_room]['evens'] += 1
-                        else:
-                            room_changes[new_room]['odds'] += 1
+                old_room = self.marsami_positions.get(marsami, (None, None))[0]
+                if old_room and old_room in self.valid_rooms:
+                    if marsami % 2 == 0:
+                        room_changes[old_room]['evens'] -= 1
+                    else:
+                        room_changes[old_room]['odds'] -= 1
+                self.marsami_positions[marsami] = (new_room, status)
+                if new_room in self.valid_rooms:
+                    if marsami % 2 == 0:
+                        room_changes[new_room]['evens'] += 1
+                    else:
+                        room_changes[new_room]['odds'] += 1
             for room_id, changes in room_changes.items():
                 if changes['odds'] or changes['evens']:
                     state = self.graph.get_room_state(room_id)
                     new_odds = max(0, state['odds'] + changes['odds'])
                     new_evens = max(0, state['evens'] + changes['evens'])
                     self.graph.update_room(room_id, new_odds, new_evens, state['points'])
-        for marsami in updated_marsamis:
-            room, status = self.marsami_positions[marsami]
-            logging.info(f"Updating DecisionMaker for marsami {marsami} in room {room}")
-            self.decision_maker.update_marsami_position(marsami, room, status)
-
-    def process_new_sounds(self):
-        logging.info("Starting process_new_sounds loop")
-        while self.running:
-            start_time = time.time()
-            conn = self.local_pool.get_connection()
-            try:
-                with conn.cursor(dictionary=True) as cursor:
-                    logging.info(f"Fetching sounds after {self.last_sound_hora}")
-                    cursor.execute("""
-                        SELECT sound, hora FROM Sound
-                        WHERE hora > %s
-                        ORDER BY hora DESC LIMIT 1
-                    """, (self.last_sound_hora,))
-                    result = cursor.fetchone()
-                    if result:
-                        self._process_single_sound(result)
-                        self.last_sound_hora = result['hora']
-                        logging.info(f"Updated last_sound_hora to {self.last_sound_hora}")
-                        with self.sound_condition:
-                            self.sound_condition.notify_all()
-            except MySQLError as e:
-                logging.error(f"Error processing sounds: {e}")
-            finally:
-                conn.close()
-            elapsed = time.time() - start_time
-            sleep_time = max(0.25 - elapsed, 0)
-            time.sleep(sleep_time)
-
-    def _process_single_sound(self, result):
-        with self.sound_condition:
-            self.current_sound[0] = result['sound']
-            self.sound_condition.notify_all()
-        logging.info(f"Processed sound: {result['sound']} at {result['hora']}")
 
     def stop(self):
         self.running = False

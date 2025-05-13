@@ -5,7 +5,7 @@ import queue
 import logging
 import threading
 from threading import Thread
-import mysql.connector 
+import mysql.connector
 from paho.mqtt import client as mqtt_client
 from datetime import datetime
 
@@ -13,21 +13,23 @@ from datetime import datetime
 logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Environment variables with default
-MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')
-MYSQL_USER = os.getenv('MYSQL_USER', 'labuser')
-MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'password')
-MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'mydb')
+# Environment variables with defaults
+LOCAL_MYSQL_HOST = os.getenv('LOCAL_MYSQL_HOST', 'localhost')
+LOCAL_MYSQL_USER = os.getenv('LOCAL_MYSQL_USER', 'labuser')
+LOCAL_MYSQL_PASSWORD = os.getenv('LOCAL_MYSQL_PASSWORD', 'password')
+LOCAL_MYSQL_DATABASE = os.getenv('LOCAL_MYSQL_DATABASE', 'mydb')
+
+CLOUD_MYSQL_HOST = os.getenv('CLOUD_MYSQL_HOST', '194.210.86.10')
+CLOUD_MYSQL_USER = os.getenv('CLOUD_MYSQL_USER', 'aluno')
+CLOUD_MYSQL_PASSWORD = os.getenv('CLOUD_MYSQL_PASSWORD', 'aluno')
+CLOUD_MYSQL_DATABASE = os.getenv('CLOUD_MYSQL_DATABASE', 'maze')
+
 MQTT_BROKER = os.getenv('MQTT_BROKER', 'test.mosquitto.org')
 MQTT_PORT = int(os.getenv('MQTT_PORT', '1883'))
-PLAYER_ID = os.getenv('PLAYER_ID', '36')
-MQTT_QOS = int(os.getenv('MQTT_QOS', '2'))
 MOVEMENT_TOPIC_PREFIX = os.getenv('MOVEMENT_TOPIC_PREFIX', 'pisid_mazemov_')
 SOUND_TOPIC_PREFIX = os.getenv('SOUND_TOPIC_PREFIX', 'pisid_mazesound_')
 PROCESSED_SUFFIX = os.getenv('PROCESSED_SUFFIX', '_processed')
 CONFIRMED_SUFFIX = os.getenv('CONFIRMED_SUFFIX', '_confirmed')
-GAME_ID = int(os.getenv('GAME_ID', '1'))
-USER_EMAIL = os.getenv('USER_EMAIL', 'default@user.com')
 SOUND_ALERT_TOLARANCE = int(os.getenv("SOUND_ALERT_TOLARANCE", "1"))
 
 # Global variables
@@ -36,125 +38,56 @@ BASENOISE = 0.0
 TOLERABLENOISEVARIATION = 0.0
 movement_queue = queue.Queue()
 sound_queue = queue.Queue()
-game_initialized_event = threading.Event()
-
-def initialize_game():
-    """Initialize the game by creating a user and game entry in MySQL if they don't exist."""
-    global GAME_ID
-    mysql_conn = None
-    cursor = None
-    try:
-        mysql_conn = mysql.connector.connect(
-            host=MYSQL_HOST,
-            user=MYSQL_USER,
-            password=MYSQL_PASSWORD,
-            database=MYSQL_DATABASE
-        )
-        cursor = mysql_conn.cursor()
-        
-        # Get or create user and retrieve their ID
-        cursor.execute("SELECT email FROM Users WHERE email = %s", (USER_EMAIL,))
-        result = cursor.fetchone()
-        if result is None:
-            sql_user = """INSERT INTO Users (email, nome, telemovel, tipo, grupo)
-                          VALUES (%s, %s, %s, %s, %s)"""
-            user_params = (USER_EMAIL, 'Default User', '000000000', 'player', 1)
-            cursor.execute(sql_user, user_params)
-            mysql_conn.commit()
-            user_id = cursor.lastrowid
-            logger.info(f"Created user with email={USER_EMAIL} and id={user_id}")
-        else:
-            user_id = result[0]
-            logger.info(f"User with email={USER_EMAIL} already exists with id={user_id}")
-        
-        # Insert game using user_id as jogador
-        sql_game = """INSERT INTO Jogo (email, jogador, scoreTotal, dataHoraInicio)
-                      VALUES (%s, %s, %s, NOW())"""
-        game_params = (USER_EMAIL, user_id, 0)
-        cursor.execute(sql_game, game_params)
-        mysql_conn.commit()
-        GAME_ID = cursor.lastrowid
-        
-        # Verify the game exists
-        cursor.execute("SELECT idJogo FROM Jogo WHERE idJogo = %s", (GAME_ID,))
-        if cursor.fetchone():
-            game_initialized_event.set()
-            logger.info(f"Game initialized with idJogo={GAME_ID}")
-        else:
-            logger.error(f"Failed to verify game insertion for idJogo={GAME_ID}")
-    except mysql.connector.Error as e:
-        logger.error(f"Database error during game initialization: {e}")
-    except Exception as e:
-        logger.error(f"Unexpected error during game initialization: {e}")
-    finally:
-        if cursor:
-            cursor.close()
-        if mysql_conn:
-            mysql_conn.close()
 
 def fetch_corridor_data():
-    """Fetch corridor data from a cloud MySQL database."""
+    """Fetch corridor data from the cloud MySQL database."""
     global CORRIDOR_MAP
     fetch_db_config = {
-        "host": "194.210.86.10",
-        "user": "aluno",
-        "password": "aluno",
-        "database": "maze",
+        "host": CLOUD_MYSQL_HOST,
+        "user": CLOUD_MYSQL_USER,
+        "password": CLOUD_MYSQL_PASSWORD,
+        "database": CLOUD_MYSQL_DATABASE,
         "port": 3306
     }
-    mysql_conn = None
-    cursor = None
     try:
-        mysql_conn = mysql.connector.connect(**fetch_db_config)
-        cursor = mysql_conn.cursor()
-        cursor.execute("SELECT Rooma, Roomb FROM corridor")
-        corridors = cursor.fetchall()
-        for corridor in corridors:
-            CORRIDOR_MAP[(corridor[0], corridor[1])] = True
-        logger.info("Corridor data fetched successfully from cloud database")
+        with mysql.connector.connect(**fetch_db_config) as mysql_conn:
+            with mysql_conn.cursor() as cursor:
+                cursor.execute("SELECT Rooma, Roomb FROM corridor")
+                corridors = cursor.fetchall()
+                for corridor in corridors:
+                    CORRIDOR_MAP[(corridor[0], corridor[1])] = True
+                logger.info("Corridor data fetched successfully from cloud database")
     except mysql.connector.Error as e:
         logger.error(f"Error fetching corridor data from cloud database: {e}")
-    finally:
-        if cursor:
-            cursor.close()
-        if mysql_conn:
-            mysql_conn.close()
 
 def fetch_setupmaze_data():
-    """Fetch noise setup data from a cloud MySQL database."""
+    """Fetch noise setup data from the cloud MySQL database."""
     global BASENOISE, TOLERABLENOISEVARIATION
     fetch_db_config = {
-        "host": "194.210.86.10",
-        "user": "aluno",
-        "password": "aluno",
-        "database": "maze",
+        "host": CLOUD_MYSQL_HOST,
+        "user": CLOUD_MYSQL_USER,
+        "password": CLOUD_MYSQL_PASSWORD,
+        "database": CLOUD_MYSQL_DATABASE,
         "port": 3306
     }
-    mysql_conn = None
-    cursor = None
     try:
-        mysql_conn = mysql.connector.connect(**fetch_db_config)
-        cursor = mysql_conn.cursor()
-        cursor.execute("SELECT normalnoise, noisevartoleration FROM setupmaze LIMIT 1")
-        result = cursor.fetchone()
-        if result:
-            BASENOISE = float(result[0])
-            TOLERABLENOISEVARIATION = float(result[1])
-        logger.info("Setupmaze data fetched successfully from cloud database")
+        with mysql.connector.connect(**fetch_db_config) as mysql_conn:
+            with mysql_conn.cursor() as cursor:
+                cursor.execute("SELECT normalnoise, noisevartoleration FROM setupmaze LIMIT 1")
+                result = cursor.fetchone()
+                if result:
+                    BASENOISE = float(result[0])
+                    TOLERABLENOISEVARIATION = float(result[1])
+                logger.info("Setupmaze data fetched successfully from cloud database")
     except mysql.connector.Error as e:
         logger.error(f"Error fetching setupmaze data from cloud database: {e}")
-    finally:
-        if cursor:
-            cursor.close()
-        if mysql_conn:
-            mysql_conn.close()
 
 def on_connect(client, userdata, flags, rc):
     """Callback for when the MQTT client connects to the broker."""
     if rc == 0:
         logger.info("Connected to MQTT broker")
-        client.subscribe(f"{MOVEMENT_TOPIC_PREFIX}{PLAYER_ID}{PROCESSED_SUFFIX}", qos=MQTT_QOS)
-        client.subscribe(f"{SOUND_TOPIC_PREFIX}{PLAYER_ID}{PROCESSED_SUFFIX}", qos=MQTT_QOS)
+        client.subscribe(f"{MOVEMENT_TOPIC_PREFIX}{PLAYER_ID}{PROCESSED_SUFFIX}", qos=int(os.getenv('MQTT_QOS', '2')))
+        client.subscribe(f"{SOUND_TOPIC_PREFIX}{PLAYER_ID}{PROCESSED_SUFFIX}", qos=int(os.getenv('MQTT_QOS', '2')))
     else:
         logger.error(f"Failed to connect to MQTT broker with code: {rc}")
 
@@ -178,7 +111,6 @@ def on_message(client, userdata, msg):
 
 def worker_mazemov():
     """Worker thread to process movement messages and insert them into MySQL."""
-    game_initialized_event.wait()
     mysql_conn = None
     ack_topic = f"{MOVEMENT_TOPIC_PREFIX}{PLAYER_ID}{CONFIRMED_SUFFIX}"
     while True:
@@ -187,26 +119,25 @@ def worker_mazemov():
         try:
             if mysql_conn is None or not mysql_conn.is_connected():
                 mysql_conn = mysql.connector.connect(
-                    host=MYSQL_HOST,
-                    user=MYSQL_USER,
-                    password=MYSQL_PASSWORD,
-                    database=MYSQL_DATABASE
+                    host=LOCAL_MYSQL_HOST,
+                    user=LOCAL_MYSQL_USER,
+                    password=LOCAL_MYSQL_PASSWORD,
+                    database=LOCAL_MYSQL_DATABASE
                 )
                 logger.info("Movement worker established MySQL connection")
             cursor = mysql_conn.cursor()
 
             message_id = payload["_id"]
-            game_id = GAME_ID
             origin_room = payload["RoomOrigin"]
             destination_room = payload["RoomDestiny"]
             marsami = payload["Marsami"]
             status = payload["Status"]
             hora_evento = payload["timestamp"]
             timestamp_dt = datetime.fromisoformat(hora_evento)
-            hora_evento = timestamp_dt.timestamp()  # This will be in seconds since epoch
+            hora_evento = timestamp_dt.timestamp()
             sql = """INSERT INTO MedicaoPassagem (hora, salaOrigem, salaDestino, marsami, status, idJogo)
                      VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, %s)"""
-            params = (hora_evento,origin_room, destination_room, marsami, status, game_id)
+            params = (hora_evento, origin_room, destination_room, marsami, status, GAME_ID)
             cursor.execute(sql, params)
             mysql_conn.commit()
             last_inserted_id = cursor.lastrowid
@@ -215,7 +146,7 @@ def worker_mazemov():
             validate_and_log_invalid_movement(marsami, origin_room, destination_room, hora_evento)
 
             ack_payload = {"_id": message_id, "mysqlID": last_inserted_id}
-            mqtt_instance.publish(ack_topic, json.dumps(ack_payload), qos=MQTT_QOS)
+            mqtt_instance.publish(ack_topic, json.dumps(ack_payload), qos=int(os.getenv('MQTT_QOS', '2')))
             logger.info(f"Sent ACK to {ack_topic} with _id {message_id} and mysqlID {last_inserted_id}")
 
         except KeyError as e:
@@ -224,7 +155,7 @@ def worker_mazemov():
             logger.error(f"Invalid value in movement payload: {e}")
         except mysql.connector.Error as e:
             if e.errno == 1452:
-                logger.error(f"Foreign key constraint failed: idJogo={game_id} does not exist in Jogo table")
+                logger.error(f"Foreign key constraint failed: idJogo={GAME_ID} does not exist in Jogo table")
             else:
                 logger.error(f"MySQL error in worker_mazemov: {e}")
             if mysql_conn:
@@ -238,7 +169,6 @@ def worker_mazemov():
 
 def worker_mazesound():
     """Worker thread to process sound messages and insert them into MySQL."""
-    game_initialized_event.wait()
     mysql_conn = None
     ack_topic = f"{SOUND_TOPIC_PREFIX}{PLAYER_ID}{CONFIRMED_SUFFIX}"
     while True:
@@ -247,21 +177,18 @@ def worker_mazesound():
         try:
             if mysql_conn is None or not mysql_conn.is_connected():
                 mysql_conn = mysql.connector.connect(
-                    host=MYSQL_HOST,
-                    user=MYSQL_USER,
-                    password=MYSQL_PASSWORD,
-                    database=MYSQL_DATABASE
+                    host=LOCAL_MYSQL_HOST,
+                    user=LOCAL_MYSQL_USER,
+                    password=LOCAL_MYSQL_PASSWORD,
+                    database=LOCAL_MYSQL_DATABASE
                 )
                 logger.info("Sound worker established MySQL connection")
             cursor = mysql_conn.cursor()
 
             message_id = payload["_id"]
-            game_id = GAME_ID
-            
             timestamp_str = payload["Hour"]
             timestamp_dt = datetime.fromisoformat(timestamp_str)
-            timestamp = timestamp_dt.timestamp()  
-            
+            timestamp = timestamp_dt.timestamp()
             sound_level = float(payload["Sound"])
             formatted_sound = f"{sound_level:.4f}"[:12]
 
@@ -270,14 +197,14 @@ def worker_mazesound():
 
             sql = """INSERT INTO Sound (hora, sound, idJogo)
                      VALUES (FROM_UNIXTIME(%s), %s, %s)"""
-            params = (timestamp, formatted_sound, game_id)
+            params = (timestamp, formatted_sound, GAME_ID)
             cursor.execute(sql, params)
             mysql_conn.commit()
             last_inserted_id = cursor.lastrowid
             logger.info(f"Inserted sound message for player {payload['Player']} with MySQL ID {last_inserted_id}")
 
             ack_payload = {"_id": message_id, "mysqlID": last_inserted_id}
-            mqtt_instance.publish(ack_topic, json.dumps(ack_payload), qos=MQTT_QOS)
+            mqtt_instance.publish(ack_topic, json.dumps(ack_payload), qos=int(os.getenv('MQTT_QOS', '2')))
             logger.info(f"Sent ACK to {ack_topic} with _id {message_id} and mysqlID {last_inserted_id}")
         except KeyError as e:
             logger.error(f"Missing key in sound payload: {e}")
@@ -285,7 +212,7 @@ def worker_mazesound():
             logger.error(f"Invalid value in sound payload: {e}")
         except mysql.connector.Error as e:
             if e.errno == 1452:
-                logger.error(f"Foreign key constraint failed: idJogo={game_id} does not exist in Jogo table")
+                logger.error(f"Foreign key constraint failed: idJogo={GAME_ID} does not exist in Jogo table")
             else:
                 logger.error(f"MySQL error in worker_mazesound: {e}")
             if mysql_conn:
@@ -298,111 +225,109 @@ def worker_mazesound():
             sound_queue.task_done()
 
 def validate_and_log_invalid_movement(marsami, sala_origem, sala_destino, hora_evento):
+    """Log invalid movement to the Mensagens table."""
     if (sala_origem, sala_destino) not in CORRIDOR_MAP:
         try:
-            mysql_conn = mysql.connector.connect(
-                host=MYSQL_HOST,
-                user=MYSQL_USER,
-                password=MYSQL_PASSWORD,
-                database=MYSQL_DATABASE
-            )
-            cursor = mysql_conn.cursor()
-            mensagem = f"Movimento inválido de {sala_origem} para {sala_destino} pelo marsami {marsami}"
-            insert_sql = """
-            INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-            VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, FROM_UNIXTIME(NOW()), %s)
-        """
-            cursor.execute(insert_sql, (
-                hora_evento,  # hora real do evento
-                1,  # sensor não se aplica
-                None,  # leitura não se aplica
-                "MOVIMENTO",  # tipo de alerta
-                mensagem,  # texto da mensagem
-                GAME_ID  # id do jogo atual
-            ))
-            mysql_conn.commit()
-            logger.warning(f"Movimento inválido registado: {mensagem}")
+            with mysql.connector.connect(
+                host=LOCAL_MYSQL_HOST,
+                user=LOCAL_MYSQL_USER,
+                password=LOCAL_MYSQL_PASSWORD,
+                database=LOCAL_MYSQL_DATABASE
+            ) as mysql_conn:
+                with mysql_conn.cursor() as cursor:
+                    mensagem = f"Movimento inválido de {sala_origem} para {sala_destino} pelo marsami {marsami}"
+                    insert_sql = """
+                    INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
+                    VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, NOW(), %s)
+                    """
+                    cursor.execute(insert_sql, (
+                        hora_evento,
+                        1,  # Assuming sensor 1 for movement
+                        None,
+                        "MOVIMENTO",
+                        mensagem,
+                        GAME_ID
+                    ))
+                    mysql_conn.commit()
+                    logger.warning(f"Logged invalid movement: {mensagem}")
         except mysql.connector.Error as e:
-            logger.error(f"Erro ao inserir mensagem de erro: {e}")
-        finally:
-            if cursor:
-                cursor.close()
-            if mysql_conn:
-                mysql_conn.close()
-
+            logger.error(f"Error logging invalid movement: {e}")
 
 def validate_and_log_alert_sound(actual_sound, hora_evento):
+    """Log sound alert if sound level is close to the limit."""
     if actual_sound > BASENOISE + TOLERABLENOISEVARIATION - SOUND_ALERT_TOLARANCE:
         try:
-            mysql_conn = mysql.connector.connect(
-                host=MYSQL_HOST,
-                user=MYSQL_USER,
-                password=MYSQL_PASSWORD,
-                database=MYSQL_DATABASE
-            )
-            cursor = mysql_conn.cursor()
-            mensagem = f"Alerta de som com o valor de: {actual_sound}, prestes a antigir o limite!"
-            insert_sql = """
-            INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-            VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, FROM_UNIXTIME(NOW()), %s)
-        """
-            cursor.execute(insert_sql, (
-                hora_evento,  # hora real do evento
-                2,  # sensor não se aplica
-                actual_sound,  # leitura não se aplica
-                "SOM",  # tipo de alerta
-                mensagem,  # texto da mensagem
-                GAME_ID  # id do jogo atual
-            ))
-            mysql_conn.commit()
-            logger.warning(f"SOM: {mensagem}")
+            with mysql.connector.connect(
+                host=LOCAL_MYSQL_HOST,
+                user=LOCAL_MYSQL_USER,
+                password=LOCAL_MYSQL_PASSWORD,
+                database=LOCAL_MYSQL_DATABASE
+            ) as mysql_conn:
+                with mysql_conn.cursor() as cursor:
+                    mensagem = f"Alerta de som com o valor de: {actual_sound}, prestes a atingir o limite!"
+                    insert_sql = """
+                    INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
+                    VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, NOW(), %s)
+                    """
+                    cursor.execute(insert_sql, (
+                        hora_evento,
+                        2,  # Assuming sensor 2 for sound
+                        actual_sound,
+                        "SOM",
+                        mensagem,
+                        GAME_ID
+                    ))
+                    mysql_conn.commit()
+                    logger.warning(f"Logged sound alert: {mensagem}")
         except mysql.connector.Error as e:
-            logger.error(f"Erro ao inserir mensagem de erro: {e}")
-        finally:
-            if cursor:
-                cursor.close()
-            if mysql_conn:
-                mysql_conn.close()
+            logger.error(f"Error logging sound alert: {e}")
 
 def validate_and_log_outlier_sound(actual_sound, hora_evento):
+    """Log sound outlier if sound level exceeds the tolerance."""
     if actual_sound > BASENOISE + TOLERABLENOISEVARIATION:
         try:
-            mysql_conn = mysql.connector.connect(
-                host=MYSQL_HOST,
-                user=MYSQL_USER,
-                password=MYSQL_PASSWORD,
-                database=MYSQL_DATABASE
-            )
-            cursor = mysql_conn.cursor()
-            mensagem = f"Outlier de som com o valor de: {actual_sound}"
-            insert_sql = """
-            INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
-            VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, FROM_UNIXTIME(NOW()), %s)
-        """
-            cursor.execute(insert_sql, (
-                hora_evento,  # hora real do evento
-                2,  # sensor não se aplica
-                None,  # leitura não se aplica
-                "SOM",  # tipo de alerta
-                mensagem,  # texto da mensagem
-                GAME_ID  # id do jogo atual
-            ))
-            mysql_conn.commit()
-            logger.warning(f"SOM: {mensagem}")
+            with mysql.connector.connect(
+                host=LOCAL_MYSQL_HOST,
+                user=LOCAL_MYSQL_USER,
+                password=LOCAL_MYSQL_PASSWORD,
+                database=LOCAL_MYSQL_DATABASE
+            ) as mysql_conn:
+                with mysql_conn.cursor() as cursor:
+                    mensagem = f"Outlier de som com o valor de: {actual_sound}"
+                    insert_sql = """
+                    INSERT INTO Mensagens (hora, sensor, leitura, tipoAlerta, mensagem, horaEscrita, idJogo)
+                    VALUES (FROM_UNIXTIME(%s), %s, %s, %s, %s, NOW(), %s)
+                    """
+                    cursor.execute(insert_sql, (
+                        hora_evento,
+                        2,  # Assuming sensor 2 for sound
+                        actual_sound,
+                        "SOM",
+                        mensagem,
+                        GAME_ID
+                    ))
+                    mysql_conn.commit()
+                    logger.warning(f"Logged sound outlier: {mensagem}")
         except mysql.connector.Error as e:
-            logger.error(f"Erro ao inserir mensagem de erro: {e}")
-        finally:
-            if cursor:
-                cursor.close()
-            if mysql_conn:
-                mysql_conn.close()
+            logger.error(f"Error logging sound outlier: {e}")
 
 if __name__ == "__main__":
-    time.sleep(10)
-    initialize_game()
+    GAME_ID = os.getenv('GAME_ID')
+    PLAYER_ID = os.getenv('PLAYER_ID')
+
+    if GAME_ID is None or PLAYER_ID is None:
+        logger.error("GAME_ID and PLAYER_ID must be set as environment variables")
+        exit(1)
+
+    try:
+        GAME_ID = int(GAME_ID)
+    except ValueError:
+        logger.error("GAME_ID must be an integer")
+        exit(1)
+
     fetch_corridor_data()
     fetch_setupmaze_data()
-    
+
     movement_thread = Thread(target=worker_mazemov, daemon=True)
     sound_thread = Thread(target=worker_mazesound, daemon=True)
     movement_thread.start()
@@ -412,7 +337,7 @@ if __name__ == "__main__":
     mqtt_instance.on_connect = on_connect
     mqtt_instance.on_message = on_message
     mqtt_instance.connect(MQTT_BROKER, MQTT_PORT)
-    mqtt_instance.loop_start()
+    mqtt_instance.loop_forever()
 
     try:
         while True:
