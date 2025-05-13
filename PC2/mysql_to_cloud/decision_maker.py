@@ -52,6 +52,8 @@ class DecisionMaker:
     def _check_room(self, room_id):
         state = self.graph.get_room_state(room_id)
         if state['odds'] == state['evens'] and state['odds'] != 0:
+            self._send_close_all_doors()
+            time.sleep(5)
             logging.info(f"Room {room_id} has balanced marsamis: odds={state['odds']}, evens={state['evens']}")
             self._send_score(room_id)
 

@@ -47,7 +47,7 @@ class DatabaseManager:
         conn = self.local_pool.get_connection()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT MAX(idJogo) FROM Jogo WHERE email = %s", (self.player_email,))
+                cursor.execute("SELECT MAX(idJogo) FROM Jogo WHERE email = %s AND estado = %s", (self.player_email,1))
                 result = cursor.fetchone()
                 return result[0] if result and result[0] else None
         except MySQLError as e:
