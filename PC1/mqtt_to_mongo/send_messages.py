@@ -23,9 +23,8 @@ SESSION_ID = os.getenv('SESSION_ID', 'default_session')
 TOPICS_CONFIG = json.loads(os.getenv('TOPICS_CONFIG', '[]'))
 QOS = int(os.getenv('QOS', '2'))
 POLL_INTERVAL = int(os.getenv('POLL_INTERVAL', '5'))
-DELAY_TIME_BETWEEN_MESSAGES = float(os.getenv('DELAY_TIME_BETWEEN_MESSAGES', '0.25'))  # 250ms
-RETRY_CHECK_INTERVAL = float(os.getenv('RETRY_CHECK_INTERVAL', '0.05'))  # 50ms
-NUMBER_OF_RETRIES_TO_SEND_MESSAGES = int(os.getenv('NUMBER_OF_RETRIES_TO_SEND_MESSAGES', '3'))
+DELAY_TIME_BETWEEN_MESSAGES = float(os.getenv('DELAY_TIME_BETWEEN_MESSAGES', '0.250'))  
+RETRY_CHECK_INTERVAL = float(os.getenv('RETRY_CHECK_INTERVAL', '0.250'))  
 RETRY_BATCH_SIZE = int(os.getenv('RETRY_BATCH_SIZE', '5'))
 
 # Global variables
@@ -198,9 +197,6 @@ def retry_worker():
             for message_id, data in pending_acks.items():
                 if message_id not in retry_counts:
                     retry_counts[message_id] = 0
-                if retry_counts[message_id] >= NUMBER_OF_RETRIES_TO_SEND_MESSAGES:
-                    messages_to_remove.append(message_id)
-                    continue
                 elapsed = (current_time - data['send_time']).total_seconds()
                 if elapsed > DELAY_TIME_BETWEEN_MESSAGES:
                     messages_to_retry.append((message_id, data))

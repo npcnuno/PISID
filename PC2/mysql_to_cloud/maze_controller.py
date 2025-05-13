@@ -12,10 +12,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 class MazeController:
     def __init__(self):
         self.PLAYER_ID = os.getenv("PLAYER_ID", "33")
-        self.FRESH_START = os.getenv("FRESH_START", "True").lower() == "true"
+        self.FRESH_START = os.getenv("FRESH_START", "False").lower() == "true"
         self.MQTT_BROKER = os.getenv("MQTT_BROKER_TO_SEND_COMMANDS", "test.mosquitto.org")
         self.MQTT_TOPIC = os.getenv("MQTT_TOPIC_TO_SEND_COMMANDS", "pisid_mazeact")
-        
+        self.USER_EMAIL = os.getenv("USER_EMAIL","default@user.com") 
         DEFAULT_CLOUD_DB = {"host": "194.210.86.10", "user": "aluno", "password": "aluno", "database": "maze", "port": 3306}
         DEFAULT_LOCAL_DB = {"host": "mysql", "port": 3306, "user": "labuser", "password": "labpass", "database": "mydb"}
         
@@ -27,16 +27,16 @@ class MazeController:
         self.graph = Graph()
         self.current_sound = [None]
         self.sound_condition = threading.Condition()
-        self.decision_condition = threading.Condition()
-
+        self.decision_condition = threading.Condition() 
         self.decision_maker = DecisionMaker(
             self.graph, self.sound_condition, self.current_sound, self.decision_condition,
             self.PLAYER_ID, self.cloud_pool, self.MQTT_BROKER, self.MQTT_TOPIC, []
         )
         self.db_manager = DatabaseManager(
-            self.graph, self.PLAYER_ID, self.FRESH_START, self.cloud_pool, self.local_pool,
+            self.graph, self.USER_EMAIL, self.FRESH_START, self.cloud_pool, self.local_pool,
             self.decision_maker, self.decision_condition, self.current_sound, self.sound_condition
         )
+
         self.running = True
 
     def create_db_pool(self, pool_name, db_config):

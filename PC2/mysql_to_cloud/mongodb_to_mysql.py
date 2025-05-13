@@ -349,7 +349,7 @@ def validate_and_log_alert_sound(actual_sound, hora_evento):
             cursor.execute(insert_sql, (
                 hora_evento,  # hora real do evento
                 2,  # sensor não se aplica
-                None,  # leitura não se aplica
+                actual_sound,  # leitura não se aplica
                 "SOM",  # tipo de alerta
                 mensagem,  # texto da mensagem
                 GAME_ID  # id do jogo atual
