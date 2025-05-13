@@ -1,13 +1,9 @@
 # app.py
 import mysql.connector
 from flask import Blueprint, request, jsonify
-def get_db():
-    return mysql.connector.connect(
-        host="localhost", 
-        user="root",
-        password="rootpass",
-        database="mydb"
-    )
+
+from routes.web import get_db
+
 android = Blueprint('android', __name__)
 
 def run_stored_procedure(proc_name, args=None):
